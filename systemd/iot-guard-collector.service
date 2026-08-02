@@ -1,0 +1,28 @@
+[Unit]
+Description=IoT Guard passive capture and ML inference
+After=network-online.target iot-guard-monitor.service
+Wants=network-online.target iot-guard-monitor.service
+
+[Service]
+Type=simple
+User=iotguard
+Group=iotguard
+EnvironmentFile=/etc/iot-guard/iot-guard.env
+ExecStart=/opt/iot-guard/venv/bin/iot-guard-collector
+Restart=on-failure
+RestartSec=5
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/iot-guard
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+
+[Install]
+WantedBy=multi-user.target

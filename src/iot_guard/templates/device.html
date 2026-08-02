@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="10">
+  <title>{{ device.hostname or device.device_id }} · IoT Guard</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+</head>
+<body>
+  <header class="topbar detail-bar">
+    <div><a class="back" href="/">← All devices</a><h1>{{ device.hostname or 'Unnamed IoT device' }}</h1><p class="device-id">{{ device.device_id }}</p></div>
+    <div class="risk-number {{ device.risk_level }}"><strong>{{ '%.0f'|format(device.risk_score) }}</strong><span>{{ device.risk_level }} risk</span></div>
+  </header>
+  <main>
+    <section class="facts">
+      <div><span>IPv4</span><strong>{{ device.ipv4 or 'Unknown' }}</strong></div>
+      <div><span>Connection</span><strong>{{ 'Online' if device.connected else 'Offline' }}</strong></div>
+      <div><span>First seen</span><strong>{{ device.first_seen[:19]|replace('T', ' ') }}</strong></div>
+      <div><span>Last seen</span><strong>{{ device.last_seen[:19]|replace('T', ' ') }}</strong></div>
+    </section>
+    <section class="event-log">
+      <div class="section-heading"><h2>Detection history</h2><span>Most recent 200 decisions</span></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Time</th><th>Decision</th><th>Type</th><th>Point</th><th>Temporal</th><th>Fused</th><th>Risk</th></tr></thead>
+        <tbody>
+        {% for event in events %}
+          <tr class="{{ 'anomaly-row' if event.decision == 'anomaly' else '' }}">
+            <td>{{ event.observed_at[:19]|replace('T', ' ') }}</td><td>{{ event.decision }}</td><td>{{ event.anomaly_type|replace('_', ' ') }}</td>
+            <td>{{ '%.2f'|format(event.point_score or 0) }}</td><td>{{ '%.2f'|format(event.temporal_score or 0) }}</td><td>{{ '%.2f'|format(event.ensemble_score or 0) }}</td><td>{{ '%.0f'|format(event.risk_after) }}</td>
+          </tr>
+        {% else %}<tr><td colspan="7" class="empty">No inference results yet.</td></tr>{% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+  </main>
+</body>
+</html>

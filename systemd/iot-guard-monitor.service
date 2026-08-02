@@ -1,0 +1,14 @@
+[Unit]
+Description=IoT Guard USB Wi-Fi monitor interface
+After=NetworkManager.service
+Wants=NetworkManager.service
+Before=iot-guard-collector.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/iot-guard/iot-guard.env
+ExecStart=/opt/iot-guard/setup_monitor.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

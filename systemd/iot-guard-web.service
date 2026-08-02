@@ -1,0 +1,25 @@
+[Unit]
+Description=IoT Guard local dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=iotguard
+Group=iotguard
+EnvironmentFile=/etc/iot-guard/iot-guard.env
+ExecStart=/opt/iot-guard/venv/bin/iot-guard-web
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/iot-guard
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

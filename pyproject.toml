@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "raspberry-pi-iot-guard"
+version = "0.1.0"
+description = "Passive per-device IoT anomaly monitoring for Raspberry Pi 5"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.30,<1",
+  "jinja2>=3.1,<4",
+  "python-multipart>=0.0.9,<1",
+  "scapy>=2.6,<3",
+  "numpy>=2.0,<3",
+  "pandas>=2.2,<4",
+  "scikit-learn>=1.6,<2",
+  "joblib>=1.4,<2",
+  "torch>=2.6,<3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9", "httpx>=0.27,<1", "ruff>=0.9,<1"]
+
+[project.scripts]
+iot-guard-collector = "iot_guard.collector:main"
+iot-guard-web = "iot_guard.web:main"
+iot-guard = "iot_guard.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/iot_guard"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
