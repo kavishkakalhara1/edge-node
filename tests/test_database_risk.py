@@ -20,6 +20,7 @@ def test_database_records_device_and_inference(tmp_path):
     }
     risk = update_risk(0, None, {**result, "is_anomaly": True, "point_ratio": 2})
     database.record_inference("iot-1", datetime.now(timezone.utc).isoformat(), result, risk)
+    database.cleanup(retention_days=30)
     dashboard = database.dashboard()
     assert dashboard["counts"]["total"] == 1
     assert dashboard["devices"][0]["risk_score"] > 0

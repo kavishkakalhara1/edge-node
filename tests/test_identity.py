@@ -29,3 +29,15 @@ def test_client_to_client_traffic_resolves_both_leases(tmp_path):
     registry.refresh()
     resolved = registry.resolve_all("02:00:00:00:00:01", "02:00:00:00:00:02")
     assert len(resolved) == 2
+
+
+def test_unreadable_lease_file_is_treated_as_empty(tmp_path, monkeypatch):
+    lease_file = tmp_path / "leases"
+    registry = LeaseRegistry(lease_file, DeviceIdentity(b"x" * 32))
+
+    def deny_read(*args, **kwargs):
+        raise PermissionError
+
+    monkeypatch.setattr(type(lease_file), "read_text", deny_read)
+    assert registry.refresh() == []
+    assert registry.by_mac == {}

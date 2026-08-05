@@ -24,6 +24,21 @@
       <div><strong>{{ recent|length }}</strong><span>Recent alerts</span></div>
     </section>
 
+    {% if latency %}
+    <section class="latency" aria-label="Anomaly decision latency">
+      <div class="latency-heading">
+        <div><p class="eyebrow">Pi benchmark</p><h2>Decision latency</h2></div>
+        <span>Model {{ latency.artifact_version }} · {{ latency.point_decision.iterations }} runs · load {{ '%.0f'|format(latency.model_load_ms) }} ms</span>
+      </div>
+      <div class="latency-values">
+        <div><span>Point median</span><strong>{{ '%.1f'|format(latency.point_decision.p50_ms) }}<small>ms</small></strong><p>mean {{ '%.1f'|format(latency.point_decision.mean_ms) }} · p95 {{ '%.1f'|format(latency.point_decision.p95_ms) }} · p99 {{ '%.1f'|format(latency.point_decision.p99_ms) }}</p></div>
+        <div><span>Fused median</span><strong>{{ '%.1f'|format(latency.fused_decision.p50_ms) }}<small>ms</small></strong><p>mean {{ '%.1f'|format(latency.fused_decision.mean_ms) }} · p95 {{ '%.1f'|format(latency.fused_decision.p95_ms) }} · p99 {{ '%.1f'|format(latency.fused_decision.p99_ms) }}</p></div>
+        <div><span>Point response</span><strong>{{ latency.point_window_seconds }}<small>s window</small></strong><p>compute follows window close</p></div>
+        <div><span>Temporal response</span><strong>{{ latency.temporal_window_seconds }}<small>s window</small></strong><p>{{ latency.temporal_warmup_seconds }}s initial warm-up</p></div>
+      </div>
+    </section>
+    {% endif %}
+
     <section class="workspace">
       <div class="device-list">
         <div class="section-heading">

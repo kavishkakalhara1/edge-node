@@ -59,11 +59,13 @@ cd raspberry-pi-iot-guard
 sudo ./scripts/install_pi.sh
 ```
 
+The installer enables SSH and all IoT Guard systemd services to start automatically on future boots.
+
 Choose a strong hotspot passphrase and create the access point:
 
 ```bash
 sudo IOT_GUARD_HOTSPOT_SSID='IoT-Guard' \
-  IOT_GUARD_HOTSPOT_PASSPHRASE='replace-with-a-long-random-passphrase' \
+  IOT_GUARD_HOTSPOT_PASSPHRASE='kali12345678' \
   IOT_GUARD_WIFI_CHANNEL=6 \
   /opt/iot-guard/configure_hotspot.sh
 ```

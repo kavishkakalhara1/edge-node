@@ -222,4 +222,5 @@ class Database:
             connection.execute("DELETE FROM traffic_windows WHERE window_start < ?", (cutoff,))
             connection.execute("DELETE FROM anomaly_events WHERE observed_at < ?", (cutoff,))
             connection.execute("DELETE FROM service_logs WHERE created_at < ?", (cutoff,))
+        with self.connect() as connection:
             connection.execute("PRAGMA wal_checkpoint(PASSIVE)")

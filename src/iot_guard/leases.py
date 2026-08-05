@@ -24,10 +24,12 @@ class LeaseRegistry:
 
     def refresh(self) -> list[Lease]:
         leases: dict[str, Lease] = {}
-        if not self.path.exists():
+        try:
+            lines = self.path.read_text(errors="replace").splitlines()
+        except (FileNotFoundError, PermissionError):
             self.by_mac = leases
             return []
-        for line in self.path.read_text(errors="replace").splitlines():
+        for line in lines:
             parts = line.split()
             if len(parts) < 4:
                 continue

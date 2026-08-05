@@ -66,6 +66,30 @@ main { padding: 28px clamp(20px, 5vw, 72px) 60px; }
 .metrics strong { display: block; font-size: 30px; }
 .metrics span, .section-heading span { color: var(--muted); font-size: 12px; }
 
+.latency {
+  margin-bottom: 24px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.latency-heading {
+  min-height: 68px;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+}
+.latency-heading h2 { font-size: 19px; }
+.latency-heading .eyebrow { margin-bottom: 2px; }
+.latency-heading > span { color: var(--muted); font-size: 12px; }
+.latency-values { display: grid; grid-template-columns: repeat(4, 1fr); }
+.latency-values > div { min-width: 0; padding: 17px 20px; border-right: 1px solid var(--line); }
+.latency-values > div:last-child { border: 0; }
+.latency-values span { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; }
+.latency-values strong { display: block; margin-top: 3px; font-size: 25px; line-height: 1.2; }
+.latency-values strong small { margin-left: 4px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.latency-values p { margin-top: 3px; color: var(--muted); font-size: 11px; }
+
 .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; }
 .device-list, .alerts, .event-log {
   min-width: 0;
@@ -139,16 +163,20 @@ td:last-child { display: flex; align-items: center; gap: 8px; }
 
 @media (max-width: 900px) {
   .workspace { grid-template-columns: minmax(0, 1fr); }
-  .metrics, .facts { grid-template-columns: repeat(2, 1fr); }
-  .metrics div:nth-child(2), .facts div:nth-child(2) { border-right: 0; }
+  .metrics, .facts, .latency-values { grid-template-columns: repeat(2, 1fr); }
+  .metrics div:nth-child(2), .facts div:nth-child(2), .latency-values > div:nth-child(2) { border-right: 0; }
+  .latency-values > div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
   .alerts { order: -1; }
 }
 
 @media (max-width: 560px) {
   .topbar { min-height: 120px; align-items: start; flex-direction: column; }
   .live { padding: 0; }
-  .metrics, .facts { grid-template-columns: minmax(0, 1fr); }
-  .metrics div, .facts div { border-right: 0; }
+  .metrics, .facts, .latency-values { grid-template-columns: minmax(0, 1fr); }
+  .metrics div, .facts div, .latency-values > div { border-right: 0; }
+  .latency-values > div { border-bottom: 1px solid var(--line); }
+  .latency-values > div:last-child { border-bottom: 0; }
+  .latency-heading { align-items: start; flex-direction: column; gap: 5px; }
   .workspace { gap: 16px; }
   main { padding-top: 16px; }
 }

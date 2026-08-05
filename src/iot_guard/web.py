@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -18,6 +19,14 @@ database = Database(settings.database_path)
 templates = Jinja2Templates(directory=PACKAGE_DIR / "templates")
 
 
+def latency_benchmark() -> dict | None:
+    path = settings.database_path.parent / "latency-benchmark.json"
+    try:
+        return json.loads(path.read_text())
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     database.initialize()
@@ -31,6 +40,7 @@ app.mount("/static", StaticFiles(directory=PACKAGE_DIR / "static"), name="static
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
     data = database.dashboard()
+    data["latency"] = latency_benchmark()
     return templates.TemplateResponse(request, "dashboard.html", data)
 
 

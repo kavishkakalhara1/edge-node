@@ -16,11 +16,15 @@ if [[ $(uname -m) != aarch64 ]]; then
 fi
 
 apt-get update
-apt-get install -y python3-venv python3-dev libopenblas-dev network-manager iw tcpdump
+apt-get install -y python3-venv python3-dev libopenblas-dev network-manager iw tcpdump acl openssh-server
 id "$SERVICE_USER" >/dev/null 2>&1 || useradd --system --home "$STATE_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
 install -d -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR"
 install -d -m 0750 -o root -g "$SERVICE_USER" "$CONFIG_DIR"
 install -d -m 0755 "$INSTALL_DIR"
+setfacl -m "u:$SERVICE_USER:--x" /var/lib/NetworkManager
+setfacl -m "d:u:$SERVICE_USER:r--" /var/lib/NetworkManager
+find /var/lib/NetworkManager -maxdepth 1 -type f -name 'dnsmasq-*.leases' \
+  -exec setfacl -m "u:$SERVICE_USER:r--" {} +
 cp -a "$ROOT/src" "$ROOT/pyproject.toml" "$ROOT/README.md" "$INSTALL_DIR/"
 cp -a "$ROOT/model" "$INSTALL_DIR/model"
 cp "$ROOT/.env.example" "$CONFIG_DIR/iot-guard.env"
@@ -42,7 +46,7 @@ install -m 0644 "$ROOT/systemd/iot-guard-monitor.service" /etc/systemd/system/
 install -m 0644 "$ROOT/systemd/iot-guard-collector.service" /etc/systemd/system/
 install -m 0644 "$ROOT/systemd/iot-guard-web.service" /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable iot-guard-monitor.service iot-guard-collector.service iot-guard-web.service
+systemctl enable ssh.service iot-guard-monitor.service iot-guard-collector.service iot-guard-web.service
 
 echo "Installation complete. Configure hotspot credentials, then run:"
 echo "  sudo IOT_GUARD_HOTSPOT_PASSPHRASE='strong-password' $INSTALL_DIR/configure_hotspot.sh"
