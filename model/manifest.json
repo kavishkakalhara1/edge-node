@@ -1,7 +1,10 @@
 {
   "sha256": {
+    "deep_svdd_head.pth": "9fb66860bb26ffa863c38b3127be8d0bfa40e7c41e4fcd5ec6e3ef6b7f722eea",
+    "gru_feature_extractor_svdd.pth": "c54009fb0ecac4ceaa703f750d5f8e9ae841f2cfc8e2a8c84219b7483f8d7c4d",
     "metadata.json": "b688e046a432a07152d333fe6dd39903a7f9175f9d1c40f1819ce87796678d63",
     "monitoring_baseline.json": "293ef5c45802219e795ca48ad0bd6ad2fc8afbc40657322726170769c1ceab8d",
+    "pipeline_artifacts_gru_svdd.joblib": "e3d39953d09fefeade4c541de39d56451c3d9c22ac36d7a8a16da2e641947d35",
     "point_svdd.pt": "f6747b706f13aadfec9c886b4bd1405450e93e08a942454f1dc0e7a3b3a68976",
     "preprocessor.joblib": "19f676db406818a2096ecf0abb42d4ee1009c88502c7d4ce8b5f789164a64638",
     "temporal_gru.pt": "ee8461e034e2ded1fd4b7b418deb5ce31499dbdc5cd9457ccf3934a40ebe7cbc"

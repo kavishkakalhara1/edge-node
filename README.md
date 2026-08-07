@@ -1,6 +1,6 @@
 # Raspberry Pi IoT Guard
 
-Passive, per-device anomaly monitoring for a Raspberry Pi 5 hotspot. The built-in `wlan0` hosts IoT clients, while a USB Wi-Fi adapter supplies `wlan1mon` for supplemental monitor-mode visibility. Traffic is aggregated into the 71 numeric features expected by the bundled Deep SVDD + GRU ensemble.
+Passive, per-device anomaly monitoring for a Raspberry Pi 5 hotspot. The built-in `wlan0` hosts IoT clients, while a USB Wi-Fi adapter supplies `wlan1mon` for supplemental monitor-mode visibility. Traffic is aggregated into the 36 numeric features expected by the exported fused GRU + Deep SVDD detector.
 
 ## What it does
 
@@ -9,7 +9,7 @@ Passive, per-device anomaly monitoring for a Raspberry Pi 5 hotspot. The built-i
 - Converts each client MAC into a stable HMAC-derived ID. Raw MAC addresses are not stored.
 - Captures decrypted hotspot traffic passively on `wlan0`; `wlan1mon` is supplemental.
 - Produces aligned 2-second point windows and 10-second temporal windows.
-- Scores point anomalies immediately and fused anomalies after seven 10-second windows.
+- Scores each interval after four consecutive aggregated records are available.
 - Stores traffic summaries, decisions, risk history, and service logs in SQLite WAL mode.
 - Hosts a local FastAPI dashboard listing devices, anomalies, and rolling risk.
 - Never retrains from live traffic or allows anomalies to update the normal baseline.
@@ -27,9 +27,13 @@ passive capture <---- wlan1mon supplemental USB monitor
     |
 per-device 2s + 10s feature windows
     |
-Deep SVDD point score + GRU temporal score
+exported scaler + single-layer GRU
     |
-OR-preserving fused decision + decaying risk score
+newest scaled row + final hidden state
+    |
+bias-free Deep SVDD head + center distance
+    |
+raw threshold decision + decaying risk score
     |
 SQLite WAL <---- FastAPI dashboard :8080
 ```
@@ -87,6 +91,7 @@ sudo journalctl -u iot-guard-collector -f
 sudo systemctl restart iot-guard-collector
 sudo /opt/iot-guard/venv/bin/iot-guard check
 sudo /opt/iot-guard/venv/bin/iot-guard verify-model
+sudo /opt/iot-guard/venv/bin/iot-guard benchmark-latency --iterations 300
 ```
 
 The collector needs `CAP_NET_RAW` and `CAP_NET_ADMIN`; the web service runs without network-administration capabilities. Application state is restricted to `/var/lib/iot-guard`.
@@ -99,13 +104,25 @@ A DHCP lease registers a connected client. Its MAC is normalized in memory and t
 device_id = "iot-" + HMAC-SHA256(secret, mac)[0:20]
 ```
 
-The database stores `device_id` and a separate HMAC audit fingerprint, not the raw MAC. For every active device, the feature engine emits:
+The database stores `device_id` and a separate HMAC audit fingerprint, not the raw MAC. For every active device, the feature engine emits aggregated numeric records:
 
-- One 71-feature row every 2 seconds.
-- One 71-feature row every 10 seconds.
+- One record every 2 seconds.
+- One record every 10 seconds.
 - Zero-traffic windows when a connected device is silent, preserving temporal alignment.
 
-The temporal model warms for 70 seconds because it needs seven consecutive 10-second windows. The first six are history and the seventh is the observed target.
+Buffers are isolated by device, aggregation interval, and collector session. The exported `window_size` is four, giving an 8-second warm-up for 2-second records and a 40-second warm-up for 10-second records. Gaps, stream resets, disconnections, and stale timeouts clear the affected buffer. Each complete rolling window scores its newest record.
+
+## Exported model contract
+
+Production startup requires these files with matching SHA-256 entries in `model/manifest.json`:
+
+- `pipeline_artifacts_gru_svdd.joblib`: ordered columns, `MinMaxScaler`, SVDD center, dimensions, window size, and raw threshold.
+- `gru_feature_extractor_svdd.pth`: single-layer GRU weights.
+- `deep_svdd_head.pth`: bias-free Deep SVDD MLP weights.
+
+The exported dimensions are 36 inputs, 64 GRU hidden values, 100 fused values, and 8 SVDD representation values. Inference reindexes each numeric aggregate to the exported order, applies the exported scaler, concatenates the newest scaled row with the final GRU hidden state, and computes squared Euclidean distance from the exported center. A score strictly greater than the raw threshold is anomalous.
+
+The required ordered schema is stored in the pipeline artifact. It contains log aggregates and numeric network statistics such as packet sizes, header lengths, counts, flags, timing, and TTL. Raw labels, timestamps, IP addresses, MAC addresses, device IDs, and other identifiers are never passed to the model. Categorical codes are not fitted or recomputed online; fixed no-data codes are used where the export did not include mappings.
 
 ## Risk score
 
@@ -118,9 +135,23 @@ Risk decays with a configurable six-hour half-life. An anomaly adds severity bas
 
 Risk is prioritization metadata, not proof that a device is compromised.
 
+## Edge inference controls
+
+Configure these in `/etc/iot-guard/iot-guard.env`:
+
+```text
+IOT_GUARD_MODEL_CPU_THREADS=2
+IOT_GUARD_MODEL_BUFFER_TIMEOUT_SECONDS=120
+IOT_GUARD_MODEL_LOG_LATENCY=false
+IOT_GUARD_MODEL_ALLOW_FALLBACK=false
+IOT_GUARD_MODEL_MAX_LATENCY_MS=0
+```
+
+The fallback is the bundled lightweight point SVDD and is disabled by default. When enabled, it is used if fused artifacts cannot load, or after inference exceeds a nonzero latency limit. Buffers are bounded and no training datasets or training code are loaded on the Pi.
+
 ## Feature compatibility warning
 
-The original packet-to-feature generator was not included with the datasets; the available archive contains feature-selection code only. This project implements explicit formulas for all 71 fields in `src/iot_guard/features.py`, but matching names does not prove distributional equivalence.
+The original packet-to-feature generator and categorical encoders were not included with the datasets. This project computes the selected numeric aggregates in `src/iot_guard/features.py` and uses the exported no-data codes for label-coded fields, but matching names does not prove distributional equivalence.
 
 Before operational use:
 
@@ -139,6 +170,26 @@ pip install -e '.[dev]'
 pytest -q
 uvicorn iot_guard.web:app --reload --port 8080
 ```
+
+Deploy, restart, and diagnose on the Pi:
+
+```bash
+sudo ./scripts/install_pi.sh
+sudo systemctl restart iot-guard-collector iot-guard-web
+sudo /opt/iot-guard/venv/bin/iot-guard verify-model
+sudo /opt/iot-guard/venv/bin/iot-guard check
+sudo journalctl -u iot-guard-collector -n 100 --no-pager
+```
+
+Measure latency, throughput, peak RAM, and CPU use:
+
+```bash
+sudo /usr/bin/time -v /opt/iot-guard/venv/bin/iot-guard benchmark-latency --iterations 1000
+pidstat -p "$(systemctl show -p MainPID --value iot-guard-collector)" 1
+grep -E 'VmRSS|VmHWM' "/proc/$(systemctl show -p MainPID --value iot-guard-collector)/status"
+```
+
+The benchmark reports latency percentiles and scores per second; `time -v` reports peak RAM and `pidstat` reports live CPU usage.
 
 For a local dashboard database:
 

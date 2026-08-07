@@ -17,6 +17,9 @@ def test_database_records_device_and_inference(tmp_path):
         "temporal_anomaly": False,
         "anomaly_type": "point",
         "decision": "anomaly",
+        "raw_score": 3.5,
+        "raw_threshold": 2.5,
+        "model_version": "gru-svdd-test",
     }
     risk = update_risk(0, None, {**result, "is_anomaly": True, "point_ratio": 2})
     database.record_inference("iot-1", datetime.now(timezone.utc).isoformat(), result, risk)
@@ -25,6 +28,9 @@ def test_database_records_device_and_inference(tmp_path):
     assert dashboard["counts"]["total"] == 1
     assert dashboard["devices"][0]["risk_score"] > 0
     assert dashboard["recent"][0]["anomaly_type"] == "point"
+    assert dashboard["recent"][0]["raw_score"] == 3.5
+    assert dashboard["recent"][0]["raw_threshold"] == 2.5
+    assert dashboard["recent"][0]["model_version"] == "gru-svdd-test"
 
 
 def test_normal_observation_decays_risk():

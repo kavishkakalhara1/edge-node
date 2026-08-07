@@ -1,6 +1,23 @@
 from iot_guard.features import FeatureAccumulator, PacketObservation
 
 
+MODEL_FEATURES = {
+    "log_data-ranges_avg", "log_data-ranges_std_deviation", "log_data-types",
+    "log_interval-messages", "log_messages_count", "network_header-length_avg",
+    "network_header-length_std_deviation", "network_interval-packets",
+    "network_ip-flags_avg", "network_ip-flags_min", "network_ip-length_avg",
+    "network_ip-length_max", "network_ip-length_min", "network_ips_all",
+    "network_ips_all_count", "network_ips_dst", "network_macs_all", "network_mss_avg",
+    "network_mss_std_deviation", "network_packet-size_avg", "network_packet-size_min",
+    "network_packets_all_count", "network_ports_all", "network_ports_all_count",
+    "network_protocols_all", "network_protocols_all_count", "network_protocols_dst",
+    "network_protocols_src", "network_tcp-flags-fin_count",
+    "network_tcp-flags-rst_count", "network_tcp-flags-syn_count",
+    "network_time-delta_avg", "network_time-delta_max", "network_time-delta_min",
+    "network_time-delta_std_deviation", "network_ttl_avg",
+}
+
+
 def packet(timestamp: float = 1.0) -> PacketObservation:
     return PacketObservation(
         timestamp=timestamp,
@@ -35,3 +52,4 @@ def test_feature_accumulator_tracks_direction_and_statistics():
     assert result.features["network_packet-size_avg"] == 100
     assert result.features["network_tcp-flags-syn_count"] == 2
     assert result.features["network_time-delta_avg"] == 0.5
+    assert MODEL_FEATURES <= result.features.keys()

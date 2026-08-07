@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS anomaly_events (
     temporal_anomaly INTEGER NOT NULL DEFAULT 0,
     anomaly_type TEXT NOT NULL,
     decision TEXT NOT NULL,
+    raw_score REAL,
+    raw_threshold REAL,
+    model_version TEXT,
     risk_before REAL NOT NULL,
     risk_after REAL NOT NULL,
     details_json TEXT NOT NULL DEFAULT '{}'
@@ -84,6 +87,15 @@ class Database:
             connection.execute("PRAGMA journal_mode = WAL")
             connection.execute("PRAGMA synchronous = NORMAL")
             connection.executescript(SCHEMA)
+            columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(anomaly_events)")
+            }
+            if "raw_threshold" not in columns:
+                connection.execute("ALTER TABLE anomaly_events ADD COLUMN raw_threshold REAL")
+            if "model_version" not in columns:
+                connection.execute("ALTER TABLE anomaly_events ADD COLUMN model_version TEXT")
+            if "raw_score" not in columns:
+                connection.execute("ALTER TABLE anomaly_events ADD COLUMN raw_score REAL")
 
     def upsert_device(
         self, device_id: str, mac_fingerprint: str, hostname: str | None, ipv4: str | None
@@ -138,8 +150,8 @@ class Database:
                 INSERT INTO anomaly_events(
                     device_id, observed_at, point_score, temporal_score, ensemble_score,
                     point_anomaly, temporal_anomaly, anomaly_type, decision,
-                    risk_before, risk_after, details_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    raw_score, raw_threshold, model_version, risk_before, risk_after, details_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     device_id,
@@ -151,6 +163,9 @@ class Database:
                     int(bool(result.get("temporal_anomaly"))),
                     result.get("anomaly_type", "normal"),
                     result.get("decision", "normal"),
+                    result.get("raw_score"),
+                    result.get("raw_threshold"),
+                    result.get("model_version"),
                     risk.previous,
                     risk.current,
                     json.dumps({"severity": risk.severity}, separators=(",", ":")),

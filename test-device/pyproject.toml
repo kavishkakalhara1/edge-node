@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "iot-guard-test-device"
+version = "0.1.0"
+description = "Controlled IoT traffic generator for Raspberry Pi IoT Guard testing"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9"]
+
+[project.scripts]
+iot-test-device = "iot_test_device.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/iot_test_device"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

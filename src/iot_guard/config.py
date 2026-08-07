@@ -23,6 +23,11 @@ class Settings:
     web_port: int
     retention_days: int
     risk_half_life_hours: float
+    model_cpu_threads: int
+    model_buffer_timeout_seconds: float
+    model_log_latency: bool
+    model_allow_fallback: bool
+    model_max_latency_ms: float
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -46,4 +51,13 @@ class Settings:
             web_port=int(os.getenv("IOT_GUARD_WEB_PORT", "8080")),
             retention_days=int(os.getenv("IOT_GUARD_RETENTION_DAYS", "30")),
             risk_half_life_hours=float(os.getenv("IOT_GUARD_RISK_HALF_LIFE_HOURS", "6")),
+            model_cpu_threads=int(os.getenv("IOT_GUARD_MODEL_CPU_THREADS", "2")),
+            model_buffer_timeout_seconds=float(
+                os.getenv("IOT_GUARD_MODEL_BUFFER_TIMEOUT_SECONDS", "120")
+            ),
+            model_log_latency=os.getenv("IOT_GUARD_MODEL_LOG_LATENCY", "false").lower()
+            in {"1", "true", "yes"},
+            model_allow_fallback=os.getenv("IOT_GUARD_MODEL_ALLOW_FALLBACK", "false").lower()
+            in {"1", "true", "yes"},
+            model_max_latency_ms=float(os.getenv("IOT_GUARD_MODEL_MAX_LATENCY_MS", "0")),
         )
