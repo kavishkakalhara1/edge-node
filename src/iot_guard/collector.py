@@ -4,7 +4,9 @@ import logging
 import signal
 import threading
 import time
-from collections import defaultdict, deque
+import uuid
+from collections import deque
+from dataclasses import dataclass
 from datetime import timezone
 
 from .capture import CaptureService
@@ -19,17 +21,66 @@ from .risk import update_risk
 LOGGER = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class BufferedRecord:
+    timestamp: float
+    features: dict[str, float]
+
+
+class RollingWindowBuffer:
+    def __init__(self, window_size: int, stale_timeout_seconds: float):
+        self.window_size = window_size
+        self.stale_timeout_seconds = stale_timeout_seconds
+        self.buffers: dict[tuple[str, int, str], deque[BufferedRecord]] = {}
+
+    def add(
+        self,
+        device_id: str,
+        resolution_seconds: int,
+        session_id: str,
+        timestamp: float,
+        features: dict[str, float],
+    ) -> list[dict[str, float]] | None:
+        key = (device_id, resolution_seconds, session_id)
+        buffer = self.buffers.setdefault(key, deque(maxlen=self.window_size))
+        if buffer:
+            gap = timestamp - buffer[-1].timestamp
+            if gap <= 0 or gap > resolution_seconds * 1.5:
+                buffer.clear()
+        buffer.append(BufferedRecord(timestamp, features))
+        if len(buffer) < self.window_size:
+            return None
+        return [record.features for record in buffer]
+
+    def clear_stale(self, now: float) -> None:
+        stale_keys = [
+            key
+            for key, buffer in self.buffers.items()
+            if not buffer or now - buffer[-1].timestamp > self.stale_timeout_seconds
+        ]
+        for key in stale_keys:
+            del self.buffers[key]
+
+    def clear_device(self, device_id: str) -> None:
+        for key in [key for key in self.buffers if key[0] == device_id]:
+            del self.buffers[key]
+
+
 class Collector:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.database = Database(settings.database_path)
         self.identity = DeviceIdentity.from_file(settings.identity_secret_file)
         self.leases = LeaseRegistry(settings.dhcp_lease_file, self.identity)
-        self.model = ProductionEnsemble(settings.artifact_dir)
-        self.temporal: dict[str, deque[dict[str, float]]] = defaultdict(
-            lambda: deque(maxlen=self.model.metadata["temporal_input_windows"])
+        self.model = ProductionEnsemble(
+            settings.artifact_dir,
+            cpu_threads=settings.model_cpu_threads,
+            allow_fallback=settings.model_allow_fallback,
         )
-        self.latest_point: dict[str, tuple[float, dict[str, float]]] = {}
+        self.session_id = uuid.uuid4().hex
+        self.windows = RollingWindowBuffer(
+            self.model.window_size, settings.model_buffer_timeout_seconds
+        )
         self.features = FeatureEngine(self._window_ready)
         self.capture = CaptureService(
             settings.capture_interfaces, self.leases, self._packet_ready
@@ -46,6 +97,7 @@ class Collector:
             while not self.stop_event.wait(1.0):
                 now = time.time()
                 self.features.tick(now)
+                self.windows.clear_stale(now)
                 self.refresh_devices()
                 if now - self.last_cleanup >= 3600:
                     self.database.cleanup(self.settings.retention_days)
@@ -67,7 +119,10 @@ class Collector:
                 lease.device_id, lease.mac_fingerprint, lease.hostname, lease.ipv4
             )
             self.features.register_device(lease.device_id, lease.mac, now)
+        disconnected = set(self.features.devices) - active_ids
         self.features.unregister_missing(active_ids)
+        for device_id in disconnected:
+            self.windows.clear_device(device_id)
         self.database.mark_disconnected_except(active_ids)
 
     def _packet_ready(self, device_id: str, packet: PacketObservation) -> None:
@@ -111,31 +166,60 @@ class Collector:
             window.packet_count,
             window.byte_count,
         )
-        if window.resolution_seconds == 2:
-            self.latest_point[window.device_id] = (window.start.timestamp(), window.features)
-            point = self.model.score_point(window.features)
-            point_result = {
-                **point,
-                "temporal_score": None,
-                "temporal_anomaly": False,
-                "ensemble_score": point["point_score"],
-                "fused_score_anomaly": False,
-                "is_anomaly": point["point_anomaly"],
-                "anomaly_type": "point" if point["point_anomaly"] else "normal",
-                "decision": "anomaly" if point["point_anomaly"] else "normal",
-            }
-            self._store_result(window.device_id, observed_at, point_result)
+        records = self.windows.add(
+            window.device_id,
+            window.resolution_seconds,
+            self.session_id,
+            window.start.timestamp(),
+            window.features,
+        )
+        if records is None:
             return
-        temporal = self.temporal[window.device_id]
-        temporal.append(window.features)
-        latest = self.latest_point.get(window.device_id)
-        if latest is None or len(temporal) < temporal.maxlen:
-            return
-        point_time, point_features = latest
-        if abs(window.start.timestamp() - point_time) > 12:
-            LOGGER.debug("Skipping stale point/temporal pair for %s", window.device_id)
-            return
-        result = self.model.score_windows(point_features, list(temporal))
+        started = time.perf_counter()
+        score = self.model.score_window(records)
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        if self.settings.model_log_latency:
+            LOGGER.info(
+                "Inference device=%s interval=%ss latency_ms=%.3f fallback=%s",
+                window.device_id,
+                window.resolution_seconds,
+                elapsed_ms,
+                score["fallback"],
+            )
+        if (
+            self.settings.model_max_latency_ms > 0
+            and elapsed_ms > self.settings.model_max_latency_ms
+            and self.settings.model_allow_fallback
+            and not self.model.is_fallback
+        ):
+            LOGGER.warning(
+                "Inference latency %.3fms exceeds %.3fms; activating fallback",
+                elapsed_ms,
+                self.settings.model_max_latency_ms,
+            )
+            self.model.activate_fallback("inference latency limit exceeded")
+            self.windows = RollingWindowBuffer(
+                self.model.window_size, self.settings.model_buffer_timeout_seconds
+            )
+        is_point = window.resolution_seconds == 2
+        result = {
+            "point_score": score["raw_score"] if is_point else None,
+            "point_anomaly": score["is_anomaly"] if is_point else False,
+            "temporal_score": None if is_point else score["raw_score"],
+            "temporal_anomaly": False if is_point else score["is_anomaly"],
+            "ensemble_score": score["raw_score"],
+            "fused_score_anomaly": score["is_anomaly"],
+            "is_anomaly": score["is_anomaly"],
+            "anomaly_type": (
+                "point" if is_point and score["is_anomaly"]
+                else "temporal" if score["is_anomaly"]
+                else "normal"
+            ),
+            "decision": score["decision"],
+            "raw_score": score["raw_score"],
+            "raw_threshold": score["raw_threshold"],
+            "model_version": score["model_version"],
+        }
         self._store_result(window.device_id, observed_at, result)
 
 

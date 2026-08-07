@@ -1,0 +1,24 @@
+[Unit]
+Description=IoT Guard controlled test device
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=iottest
+Group=iottest
+EnvironmentFile=/etc/iot-test-device/test-device.env
+ExecStart=/opt/iot-test-device/venv/bin/iot-test-device
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

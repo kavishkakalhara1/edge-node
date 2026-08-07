@@ -22,9 +22,11 @@ def _latency_summary(samples: list[float]) -> dict[str, float | int]:
         index = min(len(ordered) - 1, int((len(ordered) - 1) * fraction))
         return round(ordered[index], 3)
 
+    mean_ms = statistics.fmean(samples)
     return {
         "iterations": len(samples),
-        "mean_ms": round(statistics.fmean(samples), 3),
+        "mean_ms": round(mean_ms, 3),
+        "throughput_per_second": round(1000 / mean_ms, 3),
         "p50_ms": percentile(0.50),
         "p95_ms": percentile(0.95),
         "p99_ms": percentile(0.99),
@@ -35,14 +37,17 @@ def _latency_summary(samples: list[float]) -> dict[str, float | int]:
 
 def benchmark_latency(settings: Settings, iterations: int, warmup: int) -> dict:
     load_started = time.perf_counter_ns()
-    model = ProductionEnsemble(settings.artifact_dir)
+    model = ProductionEnsemble(
+        settings.artifact_dir,
+        cpu_threads=settings.model_cpu_threads,
+        allow_fallback=settings.model_allow_fallback,
+    )
     model_load_ms = (time.perf_counter_ns() - load_started) / 1_000_000
     row = {name: 0.0 for name in model.feature_columns}
-    temporal = [row.copy() for _ in range(model.metadata["temporal_input_windows"])]
+    window = [row.copy() for _ in range(model.window_size)]
 
     for _ in range(warmup):
-        model.score_point(row)
-        model.score_windows(row, temporal)
+        model.score_window(window)
 
     def measure(callback) -> dict[str, float | int]:
         samples = []
@@ -59,13 +64,13 @@ def benchmark_latency(settings: Settings, iterations: int, warmup: int) -> dict:
 
     result = {
         "measured_at": datetime.now(timezone.utc).isoformat(),
-        "artifact_version": model.metadata["artifact_version"],
+        "artifact_version": model.model_version,
         "model_load_ms": round(model_load_ms, 3),
-        "point_window_seconds": 2,
-        "temporal_window_seconds": 10,
-        "temporal_warmup_seconds": 10 * model.metadata["temporal_input_windows"],
-        "point_decision": measure(lambda: model.score_point(row)),
-        "fused_decision": measure(lambda: model.score_windows(row, temporal)),
+        "window_size": model.window_size,
+        "feature_count": model.input_dim,
+        "cpu_threads": settings.model_cpu_threads,
+        "fallback": model.is_fallback,
+        "fused_decision": measure(lambda: model.score_window(window)),
     }
     output = settings.database_path.parent / "latency-benchmark.json"
     output.write_text(json.dumps(result, indent=2) + "\n")
@@ -73,12 +78,19 @@ def benchmark_latency(settings: Settings, iterations: int, warmup: int) -> dict:
 
 
 def check(settings: Settings) -> None:
-    model = ProductionEnsemble(settings.artifact_dir)
+    model = ProductionEnsemble(
+        settings.artifact_dir,
+        cpu_threads=settings.model_cpu_threads,
+        allow_fallback=settings.model_allow_fallback,
+    )
     Database(settings.database_path).initialize()
     interfaces = [Path("/sys/class/net") / name for name in settings.capture_interfaces]
     report = {
-        "artifact_version": model.metadata["artifact_version"],
+        "artifact_version": model.model_version,
         "features": len(model.feature_columns),
+        "window_size": model.window_size,
+        "raw_threshold": model.threshold,
+        "fallback": model.is_fallback,
         "database": str(settings.database_path),
         "database_writable": os.access(settings.database_path.parent, os.W_OK),
         "identity_secret_present": settings.identity_secret_file.is_file(),
