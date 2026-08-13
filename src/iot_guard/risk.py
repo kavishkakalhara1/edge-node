@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 
 
 @dataclass(frozen=True)
@@ -12,14 +11,15 @@ class RiskUpdate:
     current: float
     severity: float
     level: str
+    consecutive_anomalies: int
 
 
 def risk_level(score: float) -> str:
-    if score >= 75:
+    if score >= 0.75:
         return "critical"
-    if score >= 50:
+    if score >= 0.50:
         return "high"
-    if score >= 25:
+    if score >= 0.25:
         return "medium"
     return "low"
 
@@ -30,24 +30,26 @@ def update_risk(
     inference: dict,
     half_life_hours: float = 6.0,
     now: datetime | None = None,
+    consecutive_anomalies: int = 0,
 ) -> RiskUpdate:
-    now = now or datetime.now(timezone.utc)
-    elapsed_hours = 0.0
-    if last_updated is not None:
-        if last_updated.tzinfo is None:
-            last_updated = last_updated.replace(tzinfo=timezone.utc)
-        elapsed_hours = max(0.0, (now - last_updated).total_seconds() / 3600)
-    decayed = current_score * math.pow(0.5, elapsed_hours / half_life_hours)
+    del half_life_hours, last_updated, now
+    baseline = max(0.05, min(float(current_score), 1.0))
     severity = 0.0
     if inference.get("is_anomaly"):
-        point_ratio = max(0.0, float(inference.get("point_ratio", 0.0)) - 1.0)
-        temporal_ratio = max(0.0, float(inference.get("temporal_ratio", 0.0)) - 1.0)
-        fused_ratio = max(0.0, float(inference.get("fused_ratio", 0.0)) - 1.0)
-        severity = min(3.0, max(point_ratio, temporal_ratio, fused_ratio))
-        increment = 12.0 + 9.0 * severity
-        if inference.get("anomaly_type") == "point_and_temporal":
-            increment += 10.0
-        current = min(100.0, decayed + increment)
+        gru_score = min(1.0, max(0.0, float(inference.get("gru_score", 0.0))))
+        svdd_score = min(1.0, max(0.0, float(inference.get("svdd_score", 0.0))))
+        consecutive_anomalies = min(5, consecutive_anomalies + 1)
+        repeat_boost = min(0.20, max(0, consecutive_anomalies - 1) * 0.05)
+        severity = 0.5 * (0.35 + 0.45 * gru_score + 0.40 * svdd_score + repeat_boost)
+        current = min(1.0, baseline + severity)
     else:
-        current = max(0.0, decayed - 0.25)
-    return RiskUpdate(current_score, decayed, current, severity, risk_level(current))
+        consecutive_anomalies = 0
+        current = max(baseline - 0.04, 0.05)
+    return RiskUpdate(
+        current_score,
+        baseline,
+        current,
+        severity,
+        risk_level(current),
+        consecutive_anomalies,
+    )

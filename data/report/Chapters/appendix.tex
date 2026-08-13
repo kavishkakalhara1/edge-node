@@ -1,0 +1,367 @@
+\chapter{Healing Action Catalogue and Prioritised Remediation Playbooks}\label{app:healing_actions}
+
+This appendix documents the full policy content referenced in Section \ref{cha:methodology} as part of the Knowledge Base \& RAG System that the Decision and Escalation Agents query when an incident cannot be resolved by the deterministic path alone. Section \ref{app:catalogue} lists the atomic healing actions available to the gateway, grouped by mechanism. Section \ref{app:playbooks} then shows how the Ladder Engine composes these atomic actions into a prioritised, escalating playbook for each attack class the cloud-tier classifier can output, plus the benign case in which no attack is present at all. Together, these two tables are the concrete substance behind the four abstract action categories introduced in Figure \ref{fig:architecture} (VLAN isolation, bandwidth allocation, port blocking, and local response actions): every entry in the playbooks below resolves to one or more rows of the catalogue, and every row of the catalogue maps onto one of those four categories or the observation/escalation functions that support them.
+
+\section{Healing Action Catalogue}\label{app:catalogue}
+
+Table \ref{tab:healing_catalogue} lists every atomic action the gateway can execute, organised into seven functional groups: network and traffic control (\texttt{NET}), segmentation and Layer-2 integrity (\texttt{SEG}, \texttt{L2}), access/credential/session control (\texttt{ACC}), service and application-layer control (\texttt{SVC}), device recovery (\texttt{DEV}), observation and forensics (\texttt{OBS}), and escalation (\texttt{ESC}). Each ID is referenced directly in the playbooks of Section \ref{app:playbooks}; a playbook priority tier that lists, for example, ``\texttt{NET-02 + NET-01}'' is invoking both of those catalogue entries together as a single combined step.
+
+\begin{longtable}{|p{0.10\textwidth}|p{0.16\textwidth}|p{0.20\textwidth}|p{0.415\textwidth}|}
+\caption{Healing action catalogue: every atomic action available to the Pi 5 gateway, grouped by mechanism.}
+\label{tab:healing_catalogue}\\
+\hline
+\textbf{ID} & \textbf{Group} & \textbf{Action} & \textbf{Mechanism on the Pi 5 gateway} \\
+\hline
+\endfirsthead
+\multicolumn{4}{c}{\tablename\ \thetable{} -- continued from previous page}\\
+\hline
+\textbf{ID} & \textbf{Group} & \textbf{Action} & \textbf{Mechanism on the Pi 5 gateway} \\
+\hline
+\endhead
+\hline \multicolumn{4}{r}{\textit{Continued on next page}}\\
+\endfoot
+\hline
+\endlastfoot
+NET-01 & Network and traffic control & Adaptive rate limiting & Per-source token-bucket / connection-rate limit on the gateway firewall for the offending 5-tuple or source. \\
+\hline
+NET-02 & Network and traffic control & Flood-specific hardening & SYN cookies, half-open connection caps, conntrack table limits, ICMP/UDP rate caps. \\
+\hline
+NET-03 & Network and traffic control & Temporary source block & Drop/blackhole the attacking source address with an escalating TTL (5 $\rightarrow$ 15 $\rightarrow$ 60 min). \\
+\hline
+NET-04 & Network and traffic control & Port / protocol block & Close the abused destination port or protocol at the gateway for that device. \\
+\hline
+NET-05 & Network and traffic control & Probe and scan filtering & Drop unsolicited SYN/FIN/NULL/Xmas probes and ICMP sweeps; suppress port-unreachable replies. \\
+\hline
+NET-06 & Network and traffic control & Egress and C2 blocking & Deny outbound to the observed command-and-control endpoint; DNS sinkhole the domain on the local resolver. \\
+\hline
+NET-07 & Network and traffic control & Aggregate source block & Block the offending prefix / subnet when many sources share it, instead of thousands of single rules. \\
+\hline
+NET-08 & Network and traffic control & Traffic shaping & Fair-queue and cap the victim device's share of uplink so the flood cannot starve neighbouring devices. \\
+\hline
+SEG-01 & Segmentation and L2 integrity & Quarantine VLAN & Move the device to an isolated VLAN that reaches only the gateway (management and telemetry only). \\
+\hline
+SEG-02 & Segmentation and L2 integrity & MAC-level block & Drop frames from the offending MAC at the bridge; deauthenticate / disassociate the wireless client. \\
+\hline
+SEG-03 & Segmentation and L2 integrity & Full isolation & Deny all traffic to and from the device except the controller heartbeat channel. \\
+\hline
+L2-01 & Segmentation and L2 integrity & ARP truth restoration & Install static ARP bindings for gateway and device; broadcast corrective gratuitous ARP; flush poisoned caches. \\
+\hline
+L2-02 & Segmentation and L2 integrity & ARP / DHCP inspection & Enable dynamic ARP inspection and DHCP snooping; drop offers from any non-authorised server. \\
+\hline
+L2-03 & Segmentation and L2 integrity & Force encrypted channel & Reject plaintext HTTP / MQTT / DNS for that device; pin traffic to TLS and to the gateway's DoT resolver. \\
+\hline
+L2-04 & Segmentation and L2 integrity & Re-key and re-provision & Rotate PSK, re-issue device certificate, invalidate key material that may have been observed. \\
+\hline
+ACC-01 & Access, credentials, sessions & Progressive source ban & Ban the source after N failed authentications with exponential back-off (jail-style rule set). \\
+\hline
+ACC-02 & Access, credentials, sessions & Target account lockout & Lock or throttle the specific account being guessed rather than the whole service. \\
+\hline
+ACC-03 & Access, credentials, sessions & Credential rotation & Force a new admin password / API token / MQTT credential for the device and its gateway record. \\
+\hline
+ACC-04 & Access, credentials, sessions & Harden authentication surface & Disable Telnet and password login, enforce key or certificate auth, restrict management ports to a gateway allowlist. \\
+\hline
+ACC-05 & Access, credentials, sessions & Session and token revocation & Kill active sessions, invalidate cookies and bearer tokens, force re-authentication. \\
+\hline
+SVC-01 & Service and application layer & Service restart & Restart the affected daemon on the device or its gateway-side proxy to clear exhausted resources. \\
+\hline
+SVC-02 & Service and application layer & Process kill and persistence removal & Terminate the malicious process and remove its persistence (init entry, cron job, watchdog respawn). \\
+\hline
+SVC-03 & Service and application layer & Virtual patch / WAF rule & Insert a reverse-proxy rule at the gateway blocking the observed payload class (injection, traversal, upload abuse). \\
+\hline
+SVC-04 & Service and application layer & Disable exposed function & Turn off the vulnerable endpoint, remote web UI, UPnP, or other non-essential service. \\
+\hline
+SVC-05 & Service and application layer & Request hygiene & Tighten body size, header and timeout limits; enforce strict input validation at the proxy. \\
+\hline
+DEV-01 & Device recovery & Network stack restart & Bounce the device's interface and re-DHCP without a full reboot. \\
+\hline
+DEV-02 & Device recovery & Graceful reboot & Reboot via device API or SSH; clears memory-resident state. \\
+\hline
+DEV-03 & Device recovery & Hard power cycle & Toggle the smart plug, PoE port or GPIO relay feeding the device when it is unresponsive. \\
+\hline
+DEV-04 & Device recovery & Golden-config restore & Push the last known-good configuration snapshot held by the gateway. \\
+\hline
+DEV-05 & Device recovery & Factory reset and re-provision & Reset to factory defaults, then re-provision inside quarantine with fresh unique credentials. \\
+\hline
+DEV-06 & Device recovery & Firmware re-flash / rollback & Re-flash a signed known-good image, or roll back to the previous verified version. \\
+\hline
+OBS-01 & Observation and forensics & Extended capture & Start full packet capture and verbose host logging for the incident window (evidence; always parallel). \\
+\hline
+OBS-02 & Observation and forensics & Honeypot / tarpit redirect & Redirect the attacker's flows to a deception service to profile behaviour without exposing the real device. \\
+\hline
+OBS-03 & Observation and forensics & Sensitivity boost & Lower the detection threshold and shorten the inference window for this device temporarily. \\
+\hline
+OBS-04 & Observation and forensics & Baseline update & Fold confirmed-benign behaviour back into the device profile / incremental model. \\
+\hline
+ESC-01 & Escalation & Operator notification & Dashboard alert plus out-of-band message with the incident timeline and the actions already tried. \\
+\hline
+ESC-02 & Escalation & Permanent quarantine & Keep the device isolated pending manual review; block automatic release. \\
+\hline
+ESC-03 & Escalation & Incident report & Generate machine- and human-readable reports, including the peer-device sweep results. \\
+\hline
+\end{longtable}
+
+\section{Prioritised Healing-Action Playbooks}\label{app:playbooks}
+
+For each attack class the cloud-tier classifier (Section \ref{cha:methodology}) can output, the Ladder Engine retrieves a playbook of the form shown below: a sequence of priority tiers, ordered from least disruptive (attempted first) to most disruptive (attempted only once cheaper tiers have failed), plus, where applicable, a parallel track of observation and forensics actions (denoted \texttt{P-par}) that run alongside the priority ladder rather than as a step within it. This ordering is what the ``iterate strategy'' loop in Figure \ref{fig:multiagent} steps through: each time verification reports that a dispatched action was not effective, the Ladder Engine advances to the next priority tier for the same attack class rather than repeating the tier that already failed or jumping directly to the most disruptive option.
+
+\subsection{Benign}
+
+The benign playbook (Table \ref{tab:playbook_benign}) is the counterpart, at the remediation layer, to the risk-score decay mechanism described in Section \ref{cha:methodology} (Equation \ref{e:risk_decay}): as a device's risk score relaxes toward its baseline, tier B2 relaxes any standing mitigations in step, rather than leaving a device quarantined or rate-limited indefinitely after the threat that triggered it has genuinely passed.
+
+\begin{longtable}{|p{0.10\textwidth}|p{0.13\textwidth}|p{0.18\textwidth}|p{0.465\textwidth}|}
+\caption{Benign playbook: tiers B0--B4.}
+\label{tab:playbook_benign}\\
+\hline
+\textbf{Priority} & \textbf{Action ID(s)} & \textbf{Action name} & \textbf{What is done on/for the device} \\
+\hline
+\endfirsthead
+\multicolumn{4}{c}{\tablename\ \thetable{} -- continued from previous page}\\
+\hline
+\textbf{Priority} & \textbf{Action ID(s)} & \textbf{Action name} & \textbf{What is done on/for the device} \\
+\hline
+\endhead
+\hline \multicolumn{4}{r}{\textit{Continued on next page}}\\
+\endfoot
+\hline
+\endlastfoot
+B0 & - & No action & Continue passive monitoring. No firewall, service or device change of any kind. \\
+\hline
+B1 & OBS-04 & Close open incidents & If an incident is open for this device and Benign persists for the full window, mark the last executed action as successful at level $k$ and record $k$ in the effectiveness statistics. \\
+\hline
+B2 & - & Decay and roll back mitigations & After the hold time, relax standing mitigations one step at a time: release TTL blocks, lift rate limits, return the device from the quarantine VLAN, restore the original rule set from the snapshot. \\
+\hline
+B3 & OBS-04 & Baseline maintenance & Fold the confirmed-benign window into the per-device behavioural profile; retrain or update the incremental model on a schedule, never during an open incident. \\
+\hline
+B4 & - & Integrity self-check & Verify the gateway's own rule set matches the intended state, confirm log shipping works, and confirm golden config and firmware images are present and valid. \\
+\hline
+\end{longtable}
+
+\newpage \subsection{DDoS}
+
+\begin{longtable}{|p{0.10\textwidth}|p{0.13\textwidth}|p{0.18\textwidth}|p{0.465\textwidth}|}
+\caption{DDoS playbook: priority tiers P1--P6 plus the parallel observation track.}
+\label{tab:playbook_ddos}\\
+\hline
+\textbf{Priority} & \textbf{Action ID(s)} & \textbf{Action name} & \textbf{What is done on/for the device} \\
+\hline
+\endfirsthead
+\multicolumn{4}{c}{\tablename\ \thetable{} -- continued from previous page}\\
+\hline
+\textbf{Priority} & \textbf{Action ID(s)} & \textbf{Action name} & \textbf{What is done on/for the device} \\
+\hline
+\endhead
+\hline \multicolumn{4}{r}{\textit{Continued on next page}}\\
+\endfoot
+\hline
+\endlastfoot
+P1 & NET-02 + NET-01 & Flood hardening and rate limits & Enable SYN cookies, cap half-open connections and conntrack entries, apply per-source connection-rate and packet-rate limits at the gateway. Stateless; protects the device without dropping legitimate sessions. \\
+\hline
+P2 & NET-03 + NET-05 & Block top talkers & Rank sources by contribution over the window and blackhole the top offenders with a 15 min TTL; apply protocol-specific filtering for the observed vector. \\
+\hline
+P3 & NET-07 + NET-08 & Aggregate block and shaping & Collapse per-address rules into prefix-level blocks; fair-queue and cap the victim's uplink share so other IoT devices behind the Pi keep working. \\
+\hline
+P4 & SEG-01 & Quarantine VLAN for the victim & Move the device to the isolated VLAN so the flood no longer reaches it; it stays reachable from the gateway for telemetry and control. \\
+\hline
+P5 & DEV-02 $\rightarrow$ DEV-03 & Reboot, then power cycle & Graceful reboot while still quarantined to clear exhausted state; hard power cycle if it does not return or is unresponsive to the API. \\
+\hline
+P6 & SEG-03 + ESC-01/02/03 & Isolate and hand over & Hold full isolation, notify the operator with the timeline of everything tried, generate the incident report. No further automated action. \\
+\hline
+P-par & OBS-01 + OBS-03 & Capture and fleet sensitivity & Full capture from first confirmation; raised sensitivity on all sibling devices, since a flood against one node often coincides with recon or infection attempts against the rest. \\
+\hline
+\end{longtable}
+
+\subsection{DoS}
+
+\begin{longtable}{|p{0.10\textwidth}|p{0.13\textwidth}|p{0.18\textwidth}|p{0.465\textwidth}|}
+\caption{DoS playbook: priority tiers P1--P6 plus the parallel observation track.}
+\label{tab:playbook_dos}\\
+\hline
+\textbf{Priority} & \textbf{Action ID(s)} & \textbf{Action name} & \textbf{What is done on/for the device} \\
+\hline
+\endfirsthead
+\multicolumn{4}{c}{\tablename\ \thetable{} -- continued from previous page}\\
+\hline
+\textbf{Priority} & \textbf{Action ID(s)} & \textbf{Action name} & \textbf{What is done on/for the device} \\
+\hline
+\endhead
+\hline \multicolumn{4}{r}{\textit{Continued on next page}}\\
+\endfoot
+\hline
+\endlastfoot
+P1 & NET-01 + NET-02 & Rate limit the source & Per-source token bucket on the abused port plus a connection-count cap for that source. Reversible, no effect on other peers. \\
+\hline
+P2 & NET-03 & Temporary source block & Blackhole the source with an escalating TTL: 5 min first occurrence, 15 min on repeat, 60 min on a third within the hour. \\
+\hline
+P3 & SVC-01 + SVC-05 & Restart the exhausted service, tighten limits & Restart the affected daemon to release leaked sockets, threads and memory; tighten timeouts, max body size and per-client concurrency at the gateway proxy. \\
+\hline
+P4 & NET-04 (+ SVC-04) & Close the abused port / protocol & Block the targeted port at the gateway for this device, exposing only what it genuinely needs; disable the exposed function if non-essential. \\
+\hline
+P5 & DEV-01 $\rightarrow$ DEV-02 $\rightarrow$ DEV-04 & Recover the device & Restart the network stack first (cheapest), then a full reboot, then restore the golden configuration if the device returns misconfigured. \\
+\hline
+P6 & SEG-01 + ESC-01 & Quarantine and escalate & Quarantine, alert the operator with the resource-exhaustion evidence, recommend a firmware or vendor-side fix. \\
+\hline
+P-par & OBS-01 + OBS-03 & Capture and sensitivity & Full capture; sensitivity boost on the affected device only (unlike DDoS, no fleet-wide boost needed). \\
+\hline
+\end{longtable}
+
+\subsection{Reconnaissance}
+
+\begin{longtable}{|p{0.10\textwidth}|p{0.13\textwidth}|p{0.18\textwidth}|p{0.465\textwidth}|}
+\caption{Reconnaissance playbook: priority tiers P1--P6.}
+\label{tab:playbook_recon}\\
+\hline
+\textbf{Priority} & \textbf{Action ID(s)} & \textbf{Action name} & \textbf{What is done on/for the device} \\
+\hline
+\endfirsthead
+\multicolumn{4}{c}{\tablename\ \thetable{} -- continued from previous page}\\
+\hline
+\textbf{Priority} & \textbf{Action ID(s)} & \textbf{Action name} & \textbf{What is done on/for the device} \\
+\hline
+\endhead
+\hline \multicolumn{4}{r}{\textit{Continued on next page}}\\
+\endfoot
+\hline
+\endlastfoot
+P1 & OBS-01 + OBS-03 & Observe silently, raise sensitivity & Full capture of the scan, extract the source fingerprint and target list, lower detection thresholds for every device the scan touched. No blocking yet. \\
+\hline
+P2 & NET-05 & Filter probes, reduce leakage & Drop unsolicited SYN/FIN/NULL/Xmas probes and ICMP sweeps, suppress port-unreachable and TTL-expired replies, normalise responses so open and closed ports look alike. \\
+\hline
+P3 & NET-01 & Rate limit / tarpit the scanner & Cap new connections per second from that source and delay responses so a full scan becomes prohibitively slow without an outright block. \\
+\hline
+P4 & NET-03 + SVC-04 & Block the source, shrink the surface & Block the scanner for 30 min and permanently disable the non-essential exposed services it found (remote web UI, UPnP, Telnet, debug ports); apply the hardened config snapshot if one exists. \\
+\hline
+P5 & OBS-02 or SEG-01 & Deceive (external) or quarantine (internal) & External source: redirect its flows to a honeypot/tarpit while the real device is untouched. Internal source: the scanning device is presumed compromised - quarantine it and enter the Malware (Mirai) playbook. \\
+\hline
+P6 & ESC-01 + ESC-03 & Alert and report & Notify the operator that reconnaissance is sustained and targeted, attach the target/port map, recommend a segmentation review, sweep peers for the same indicators. \\
+\hline
+\end{longtable}
+
+\subsection{Web}
+
+\begin{longtable}{|p{0.10\textwidth}|p{0.13\textwidth}|p{0.18\textwidth}|p{0.465\textwidth}|}
+\caption{Web playbook: priority tiers P1--P6.}
+\label{tab:playbook_web}\\
+\hline
+\textbf{Priority} & \textbf{Action ID(s)} & \textbf{Action name} & \textbf{What is done on/for the device} \\
+\hline
+\endfirsthead
+\multicolumn{4}{c}{\tablename\ \thetable{} -- continued from previous page}\\
+\hline
+\textbf{Priority} & \textbf{Action ID(s)} & \textbf{Action name} & \textbf{What is done on/for the device} \\
+\hline
+\endhead
+\hline \multicolumn{4}{r}{\textit{Continued on next page}}\\
+\endfoot
+\hline
+\endlastfoot
+P1 & SVC-03 + SVC-05 & Virtual patch at the gateway proxy & Insert a rule blocking the observed payload class (injection strings, traversal sequences, oversized or unexpected uploads) and tighten body, header and method limits. Device firmware unchanged. \\
+\hline
+P2 & ACC-05 + ACC-01 & Revoke sessions, ban the source & Invalidate active sessions and tokens for the interface (any hijacked session dies), then ban the source after N blocked attempts. \\
+\hline
+P3 & SVC-04 & Disable the exposed interface & Turn off the vulnerable endpoint, or restrict the whole web UI to gateway-local access, keeping the device's primary function running. \\
+\hline
+P4 & ACC-03 + ACC-04 & Rotate credentials, harden auth & Assume the interface leaked or accepted something: rotate admin credentials and API tokens, enforce key/certificate auth, disable password login, re-check the account list for additions. \\
+\hline
+P5 & DEV-04 + SVC-01 & Restore known-good state & Push the golden configuration snapshot, restart the web service, re-verify the integrity baseline - with the device in quarantine so it cannot be re-hit mid-restore. \\
+\hline
+P6 & DEV-06 / ESC-02 & Re-flash or retire & Re-flash a signed known-good firmware image (operator approval), re-provision with fresh credentials, then report. If re-flash is impossible, hold permanent quarantine. \\
+\hline
+\end{longtable}
+
+\subsection{Brute Force}
+
+\begin{longtable}{|p{0.10\textwidth}|p{0.13\textwidth}|p{0.18\textwidth}|p{0.465\textwidth}|}
+\caption{Brute Force playbook: priority tiers P1--P6.}
+\label{tab:playbook_bruteforce}\\
+\hline
+\textbf{Priority} & \textbf{Action ID(s)} & \textbf{Action name} & \textbf{What is done on/for the device} \\
+\hline
+\endfirsthead
+\multicolumn{4}{c}{\tablename\ \thetable{} -- continued from previous page}\\
+\hline
+\textbf{Priority} & \textbf{Action ID(s)} & \textbf{Action name} & \textbf{What is done on/for the device} \\
+\hline
+\endhead
+\hline \multicolumn{4}{r}{\textit{Continued on next page}}\\
+\endfoot
+\hline
+\endlastfoot
+P1 & ACC-01 & Progressive source ban & Ban the source after N failures with exponential back-off (5 failures $\rightarrow$ 5 min, then 30 min, then 24 h). Cheapest possible action; defeats most automated guessing. \\
+\hline
+P2 & ACC-02 + NET-03 & Lock the account, block the source & Throttle or lock the specific account being guessed rather than the whole service, and blackhole the source addresses with a 60 min TTL. \\
+\hline
+P3 & ACC-04 + NET-04 & Remove the guessable surface & Disable Telnet entirely, disable password authentication in favour of keys/certificates, restrict management ports to the Pi 5 gateway allowlist. \\
+\hline
+P4 & ACC-05 + ACC-03 + SEG-01 & Treat as compromise & Kill all active sessions, rotate every credential and key on the device and in the gateway record, and move the device to the quarantine VLAN. \\
+\hline
+P5 & DEV-02 + DEV-04 & Reboot and restore & Reboot inside quarantine to clear memory-resident payloads, then restore the golden configuration and re-verify the account list and authorised keys. \\
+\hline
+P6 & DEV-05 + ESC-03 & Factory reset and re-provision & Factory reset (operator approval), then re-provision inside quarantine with fresh unique credentials, key-only authentication and Telnet permanently disabled. \\
+\hline
+\end{longtable}
+
+\subsection{MITM}
+
+\begin{longtable}{|p{0.10\textwidth}|p{0.13\textwidth}|p{0.18\textwidth}|p{0.465\textwidth}|}
+\caption{MITM (Man-in-the-Middle) playbook: priority tiers P1--P6.}
+\label{tab:playbook_mitm}\\
+\hline
+\textbf{Priority} & \textbf{Action ID(s)} & \textbf{Action name} & \textbf{What is done on/for the device} \\
+\hline
+\endfirsthead
+\multicolumn{4}{c}{\tablename\ \thetable{} -- continued from previous page}\\
+\hline
+\textbf{Priority} & \textbf{Action ID(s)} & \textbf{Action name} & \textbf{What is done on/for the device} \\
+\hline
+\endhead
+\hline \multicolumn{4}{r}{\textit{Continued on next page}}\\
+\endfoot
+\hline
+\endlastfoot
+P1 & L2-01 & Restore correct ARP mappings & Install static ARP bindings for the gateway and affected devices, flush poisoned caches, broadcast corrective gratuitous ARP so victims relearn the authentic MAC. \\
+\hline
+P2 & L2-02 & Enable inspection, reject rogue infrastructure & Turn on dynamic ARP inspection and DHCP snooping on the bridge; drop DHCP offers and DNS responses not from the authorised service; pin the device resolver to the Pi. \\
+\hline
+P3 & SEG-02 & Remove the attacker from the segment & Block the offending MAC at the bridge and, for wireless clients, deauthenticate/disassociate it. If the MAC belongs to a known internal device, treat that device as compromised. \\
+\hline
+P4 & L2-03 & Make interception worthless & Reject plaintext protocols for the affected devices: enforce TLS for HTTP and MQTT, force DNS over TLS to the gateway resolver, drop downgrade attempts. \\
+\hline
+P5 & L2-04 + ACC-03 & Re-key everything exposed & Rotate PSKs, re-issue device certificates, rotate any credential or token that traversed the intercepted path, invalidate sessions established during the incident window. \\
+\hline
+P6 & SEG-03 + ESC-01/03 & Isolate the segment and escalate & Isolate the affected segment, alert the operator with spoofing evidence and the list of possibly exposed secrets, recommend port security and 802.1X. \\
+\hline
+\end{longtable}
+
+\subsection{Malware (Mirai)}
+
+\begin{longtable}{|p{0.10\textwidth}|p{0.13\textwidth}|p{0.18\textwidth}|p{0.465\textwidth}|}
+\caption{Malware (Mirai) playbook: priority tiers P1--P6 plus the parallel observation track.}
+\label{tab:playbook_mirai}\\
+\hline
+\textbf{Priority} & \textbf{Action ID(s)} & \textbf{Action name} & \textbf{What is done on/for the device} \\
+\hline
+\endfirsthead
+\multicolumn{4}{c}{\tablename\ \thetable{} -- continued from previous page}\\
+\hline
+\textbf{Priority} & \textbf{Action ID(s)} & \textbf{Action name} & \textbf{What is done on/for the device} \\
+\hline
+\endhead
+\hline \multicolumn{4}{r}{\textit{Continued on next page}}\\
+\endfoot
+\hline
+\endlastfoot
+P1 & SEG-01 + NET-06 & Contain and cut command-and-control & Immediately move the device to the quarantine VLAN and block egress to the observed C2 endpoint (address block plus DNS sinkhole). Stops C2 control and the device's participation in outbound floods and scanning. \\
+\hline
+P2 & SVC-02 & Kill the process and remove persistence & Terminate the malicious process and its watchdog, remove persistence (init/rc entries, cron, spurious units, modified startup scripts), close the ports it opened. \\
+\hline
+P3 & DEV-02 $\rightarrow$ DEV-03 & Reboot / power cycle inside quarantine & Reboot to clear the memory-resident payload; hard power cycle if unresponsive. Stays in quarantine across the reboot. \\
+\hline
+P4 & ACC-04 + ACC-03 & Close the infection vector & Before release: disable Telnet (23/2323) and password SSH permanently, replace every default or shared credential with a unique one, enforce key/certificate auth, restrict management to the gateway allowlist. \\
+\hline
+P5 & DEV-04 $\rightarrow$ DEV-06 & Rebuild from a trusted image & Restore the golden configuration; if integrity checks still fail, re-flash a signed known-good image or roll back to the last verified version. Performed entirely inside quarantine. \\
+\hline
+P6 & DEV-05 / ESC-02 + ESC-03 & Reset, or retire under quarantine & Factory reset and re-provision with fresh unique credentials (operator approval), or keep the device permanently quarantined pending replacement. Generate the report and sweep every peer device. \\
+\hline
+P-par & OBS-01 + OBS-03 & Capture, fleet sensitivity, credential audit & Capture including the full C2 conversation and any dropper transfer; sensitivity boost on all devices; immediate credential audit of every device sharing the compromised credential set. \\
+\hline
+\end{longtable}

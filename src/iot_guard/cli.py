@@ -84,7 +84,15 @@ def check(settings: Settings) -> None:
         allow_fallback=settings.model_allow_fallback,
     )
     Database(settings.database_path).initialize()
-    interfaces = [Path("/sys/class/net") / name for name in settings.capture_interfaces]
+    interface_names = set(settings.capture_interfaces)
+    interface_names.update(
+        {
+            settings.hotspot_interface,
+            settings.monitor_interface,
+            settings.cloud_uplink_interface,
+        }
+    )
+    interfaces = [Path("/sys/class/net") / name for name in sorted(interface_names)]
     report = {
         "artifact_version": model.model_version,
         "features": len(model.feature_columns),
@@ -95,6 +103,11 @@ def check(settings: Settings) -> None:
         "database_writable": os.access(settings.database_path.parent, os.W_OK),
         "identity_secret_present": settings.identity_secret_file.is_file(),
         "dhcp_lease_file_present": settings.dhcp_lease_file.is_file(),
+        "network_roles": {
+            "iot_hotspot": settings.hotspot_interface,
+            "cloud_uplink": settings.cloud_uplink_interface,
+            "separate": settings.hotspot_interface != settings.cloud_uplink_interface,
+        },
         "interfaces": {path.name: path.exists() for path in interfaces},
     }
     print(json.dumps(report, indent=2))

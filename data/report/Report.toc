@@ -1,0 +1,84 @@
+\gdef \the@ipfilectr {@-1}
+\gdef \the@ipfilectr {}
+\contentsline {chapter}{Abstract}{ii}{chapter*.1}%
+\contentsline {chapter}{Acknowledgements}{iii}{chapter*.2}%
+\contentsline {chapter}{Contents}{vi}{chapter*.3}%
+\contentsline {chapter}{List of Figures}{ix}{chapter*.4}%
+\contentsline {chapter}{List of Tables}{x}{chapter*.5}%
+\contentsline {chapter}{Acronyms}{xii}{table.0.1}%
+\contentsline {chapter}{\numberline {1}Introduction}{1}{chapter.1}%
+\contentsline {section}{\numberline {1.1}Background}{1}{section.1.1}%
+\contentsline {subsection}{\numberline {1.1.1}Scale and Criticality of Contemporary IoT Deployment}{1}{subsection.1.1.1}%
+\contentsline {subsection}{\numberline {1.1.2}Resource Constraints and the Endpoint Security Gap}{2}{subsection.1.1.2}%
+\contentsline {subsection}{\numberline {1.1.3}The Evolving IoT Threat Landscape}{2}{subsection.1.1.3}%
+\contentsline {subsection}{\numberline {1.1.4}Limitations of Prevailing Detection and Response Practice}{3}{subsection.1.1.4}%
+\contentsline {subsection}{\numberline {1.1.5}Regulatory Pressure Toward Secure and Resilient Connected Products}{4}{subsection.1.1.5}%
+\contentsline {subsection}{\numberline {1.1.6}Toward Autonomous, Self-Healing Defence}{5}{subsection.1.1.6}%
+\contentsline {section}{\numberline {1.2}Problem Statement}{5}{section.1.2}%
+\contentsline {subsection}{\numberline {1.2.1}The Latency-Capability Trade-off in Centralized and Edge-Only Architectures}{6}{subsection.1.2.1}%
+\contentsline {subsection}{\numberline {1.2.2}Opacity of Machine-Learning-Based Detection and the Erosion of Analyst Trust}{7}{subsection.1.2.2}%
+\contentsline {subsection}{\numberline {1.2.3}The Manual-Intervention Bottleneck in Diagnostic Frameworks}{8}{subsection.1.2.3}%
+\contentsline {subsection}{\numberline {1.2.4}Synthesis: A Case for Autonomous, Closed-Loop Defence}{9}{subsection.1.2.4}%
+\contentsline {section}{\numberline {1.3}Objectives and Scope}{9}{section.1.3}%
+\contentsline {subsection}{\numberline {1.3.1}Objectives}{9}{subsection.1.3.1}%
+\contentsline {subsection}{\numberline {1.3.2}Scope}{9}{subsection.1.3.2}%
+\contentsline {chapter}{\numberline {2}Literature Review}{11}{chapter.2}%
+\contentsline {section}{\numberline {2.1}Anomaly Detection in IoT Edge Environments}{11}{section.2.1}%
+\contentsline {section}{\numberline {2.2}Threat Classification and XAI}{12}{section.2.2}%
+\contentsline {section}{\numberline {2.3}Agentic AI, Multi-Agent Systems, and Self-Healing Networks}{14}{section.2.3}%
+\contentsline {section}{\numberline {2.4}Federated Intrusion Detection}{15}{section.2.4}%
+\contentsline {section}{\numberline {2.5}Software-Defined Networking and Automated Network-Level Remediation}{17}{section.2.5}%
+\contentsline {section}{\numberline {2.6}Edge-Native Model Compression and On-Device Inference}{18}{section.2.6}%
+\contentsline {section}{\numberline {2.7}Research Gap and Positioning of the Proposed Framework}{19}{section.2.7}%
+\contentsline {chapter}{\numberline {3}Methodology}{21}{chapter.3}%
+\contentsline {section}{\numberline {3.1}Edge Layer: Traffic Monitoring and Representation}{21}{section.3.1}%
+\contentsline {section}{\numberline {3.2}Cascaded Hybrid (Stacked) Ensemble Model}{24}{section.3.2}%
+\contentsline {section}{\numberline {3.3}Two-Stage Rolling Risk Scoring Mechanism}{28}{section.3.3}%
+\contentsline {section}{\numberline {3.4}Cloud Layer: Threat Classification and XAI}{30}{section.3.4}%
+\contentsline {section}{\numberline {3.5}Multi-Agent System and Self-Healing Orchestration}{34}{section.3.5}%
+\contentsline {section}{\numberline {3.6}Communication and Transport-Layer Security}{38}{section.3.6}%
+\contentsline {subsection}{\numberline {3.6.1}Device to Hub (Edge): Two-Stage Mutual Authentication and Encrypted Telemetry}{38}{subsection.3.6.1}%
+\contentsline {subsection}{\numberline {3.6.2}Hub to Cloud (Dashboard) Communication}{39}{subsection.3.6.2}%
+\contentsline {section}{\numberline {3.7}Time Plan and Resources Required}{39}{section.3.7}%
+\contentsline {chapter}{\numberline {4}Experiments, Results and Discussion}{42}{chapter.4}%
+\contentsline {section}{\numberline {4.1}Experimental Setup}{42}{section.4.1}%
+\contentsline {section}{\numberline {4.2}Edge Layer: Anomaly Detection Performance}{43}{section.4.2}%
+\contentsline {section}{\numberline {4.3}Cloud Layer: Threat Classification and XAI}{48}{section.4.3}%
+\contentsline {subsection}{\numberline {4.3.1}Explanation-Quality Metrics}{50}{subsection.4.3.1}%
+\contentsline {section}{\numberline {4.4}Multi-Agent Self-Healing Evaluation}{59}{section.4.4}%
+\contentsline {section}{\numberline {4.5}Cloud Dashboard: Operator-Facing Interface}{61}{section.4.5}%
+\contentsline {subsection}{\numberline {4.5.1}Overview Page}{61}{subsection.4.5.1}%
+\contentsline {subsection}{\numberline {4.5.2}Edge Layer Page}{62}{subsection.4.5.2}%
+\contentsline {subsection}{\numberline {4.5.3}Cloud Analytics Page}{63}{subsection.4.5.3}%
+\contentsline {subsection}{\numberline {4.5.4}Devices Page}{63}{subsection.4.5.4}%
+\contentsline {subsection}{\numberline {4.5.5}Reports Page}{64}{subsection.4.5.5}%
+\contentsline {subsection}{\numberline {4.5.6}Healing Page}{64}{subsection.4.5.6}%
+\contentsline {section}{\numberline {4.6}Discussion}{66}{section.4.6}%
+\contentsline {subsection}{\numberline {4.6.1}Edge Intelligence and the Mitigation of Alert Fatigue}{66}{subsection.4.6.1}%
+\contentsline {subsection}{\numberline {4.6.2}The Paradigm Shift to Machine-Readable XAI}{67}{subsection.4.6.2}%
+\contentsline {subsection}{\numberline {4.6.3}Autonomous Remediation and System Limitations}{67}{subsection.4.6.3}%
+\contentsline {chapter}{\numberline {5}Conclusion and Future Work}{69}{chapter.5}%
+\contentsline {section}{\numberline {5.1}Summary of the Research}{69}{section.5.1}%
+\contentsline {section}{\numberline {5.2}Achievement of Objectives}{69}{section.5.2}%
+\contentsline {section}{\numberline {5.3}Major Contributions}{71}{section.5.3}%
+\contentsline {section}{\numberline {5.4}Limitations}{72}{section.5.4}%
+\contentsline {section}{\numberline {5.5}Future Research Directions}{72}{section.5.5}%
+\contentsline {subsection}{\numberline {5.5.1}Federated and Collaborative Self-Healing Across Gateways}{73}{subsection.5.5.1}%
+\contentsline {subsection}{\numberline {5.5.2}Hybrid AI--Blockchain Trust and Audit for Healing Actions}{73}{subsection.5.5.2}%
+\contentsline {subsection}{\numberline {5.5.3}Reinforcement and Meta-Learning for Adaptive Healing Policies}{73}{subsection.5.5.3}%
+\contentsline {subsection}{\numberline {5.5.4}Constrained Multi-Agent LLM Security Orchestration}{73}{subsection.5.5.4}%
+\contentsline {subsection}{\numberline {5.5.5}Dataset-Centric Evaluation and Real-World Benchmarking}{74}{subsection.5.5.5}%
+\contentsline {subsection}{\numberline {5.5.6}Safety, Explainability, and Human-in-the-Loop Assurance}{74}{subsection.5.5.6}%
+\contentsline {section}{\numberline {5.6}Publications and Research Outcomes}{74}{section.5.6}%
+\contentsline {chapter}{\numberline {A}Healing Action Catalogue and Prioritised Remediation Playbooks}{75}{appendix.A}%
+\contentsline {section}{\numberline {A.1}Healing Action Catalogue}{75}{section.A.1}%
+\contentsline {section}{\numberline {A.2}Prioritised Healing-Action Playbooks}{78}{section.A.2}%
+\contentsline {subsection}{\numberline {A.2.1}Benign}{79}{subsection.A.2.1}%
+\contentsline {subsection}{\numberline {A.2.2}DDoS}{80}{subsection.A.2.2}%
+\contentsline {subsection}{\numberline {A.2.3}DoS}{80}{subsection.A.2.3}%
+\contentsline {subsection}{\numberline {A.2.4}Reconnaissance}{81}{subsection.A.2.4}%
+\contentsline {subsection}{\numberline {A.2.5}Web}{82}{subsection.A.2.5}%
+\contentsline {subsection}{\numberline {A.2.6}Brute Force}{83}{subsection.A.2.6}%
+\contentsline {subsection}{\numberline {A.2.7}MITM}{84}{subsection.A.2.7}%
+\contentsline {subsection}{\numberline {A.2.8}Malware (Mirai)}{85}{subsection.A.2.8}%
+\contentsline {chapter}{Bibliography}{87}{appendix.B}%

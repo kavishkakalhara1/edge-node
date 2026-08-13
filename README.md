@@ -38,14 +38,15 @@ raw threshold decision + decaying risk score
 SQLite WAL <---- FastAPI dashboard :8080
 ```
 
-Monitor-mode frames on a WPA2 channel are generally encrypted and do not reproduce the model's IP/TCP features. The app therefore uses decrypted traffic visible on the hotspot interface for ML and treats the external adapter as supplemental passive visibility. It performs no deauthentication, injection, blocking, or active probing.
+Monitor-mode frames on a WPA2 channel are generally encrypted and do not reproduce the model's IP/TCP features. The app therefore uses decrypted traffic visible on the hotspot interface for ML and treats the external adapter as supplemental passive visibility. Capture and inference remain passive. Authenticated healing requests can apply the explicitly supported gateway firewall actions through the collector service.
 
 ## Hardware and OS
 
 - Raspberry Pi 5 running 64-bit Raspberry Pi OS Bookworm.
-- Built-in Wi-Fi available as `wlan0`.
+- Built-in Wi-Fi `wlan0` dedicated to the IoT hotspot.
+- Ethernet `eth0` dedicated to cloud access by default. A second Wi-Fi adapter may be used instead by setting `IOT_GUARD_CLOUD_UPLINK_INTERFACE`.
 - USB Wi-Fi adapter with Linux monitor-mode support, normally `wlan1`.
-- Ethernet uplink is recommended so `wlan0` can remain dedicated to the hotspot.
+- A Wi-Fi adapter used as the cloud uplink cannot simultaneously serve as the `wlan1mon` monitor adapter.
 - Use only on networks and devices you own or are authorized to monitor.
 
 Check adapter monitor support:
@@ -94,6 +95,28 @@ sudo /opt/iot-guard/venv/bin/iot-guard verify-model
 sudo /opt/iot-guard/venv/bin/iot-guard benchmark-latency --iterations 300
 ```
 
+## Healing API
+
+Healing requests use the catalogue action ID and the pseudonymous device ID. The web service records each request without network-administration privileges; the collector claims it from SQLite and applies the action with its bounded `CAP_NET_ADMIN` capability. A successful POST returns `202` and a request ID, not a claim that enforcement has already succeeded.
+
+The installer generates `IOT_GUARD_HEALING_API_TOKEN` in `/etc/iot-guard/iot-guard.env`. Send it in the `X-IoT-Guard-Token` header. The currently implemented actions are:
+
+- `NET-03`: requires `source_ipv4`; optional `ttl_seconds` defaults to 300 and must be 60-3600.
+- `SEG-03`: isolates the device's current leased IPv4; optional `heartbeat_ipv4` remains allowed.
+
+```bash
+TOKEN='value-from-/etc/iot-guard/iot-guard.env'
+curl -X POST http://10.42.0.1:8080/api/devices/iot-device-id/healing-actions/NET-03 \
+    -H "X-IoT-Guard-Token: $TOKEN" \
+    -H 'Content-Type: application/json' \
+    -d '{"parameters":{"source_ipv4":"192.0.2.8","ttl_seconds":900}}'
+
+curl http://10.42.0.1:8080/api/healing-actions/request-id \
+    -H "X-IoT-Guard-Token: $TOKEN"
+```
+
+Terminal states are `succeeded` and `failed`; failures include an actionable `error` field. Catalogue IDs without a gateway implementation return `422` instead of pretending that an external device operation succeeded.
+
 The collector needs `CAP_NET_RAW` and `CAP_NET_ADMIN`; the web service runs without network-administration capabilities. Application state is restricted to `/var/lib/iot-guard`.
 
 ## Data flow
@@ -126,12 +149,39 @@ The required ordered schema is stored in the pipeline artifact. It contains log 
 
 ## Risk score
 
-Risk decays with a configurable six-hour half-life. An anomaly adds severity based on the largest point, temporal, or fused threshold ratio. Simultaneous point and temporal anomalies receive an additional increment. Normal decisions slowly reduce risk. Levels are:
+Each device has a persistent risk score $R \in [0,1]$ in local SQLite, following the rolling mechanism in the project report. An anomalous window applies the weighted hit, normalized model evidence, and repeat-offender boost; a benign window subtracts `0.04` to a baseline of `0.05`. Levels are:
 
-- `low`: below 25
-- `medium`: 25 to 49
-- `high`: 50 to 74
-- `critical`: 75 to 100
+
+The collector clears current risk to `0` and resets consecutive-anomaly counters at each UTC midnight and on startup if the stored score is from an earlier date. Device records and anomaly history are retained according to `IOT_GUARD_RETENTION_DAYS`.
+
+## Cloud anomaly reporting
+
+Set `IOT_GUARD_CLOUD_API_ENDPOINT` to POST anomalous inference windows to a cloud API. Leave it blank to keep reporting disabled. `IOT_GUARD_CLOUD_API_TOKEN` is optional and, when set, is sent as a bearer token. `IOT_GUARD_CLOUD_API_TIMEOUT_SECONDS` defaults to 5 seconds.
+
+```text
+IOT_GUARD_CLOUD_API_ENDPOINT=https://cloud.example/api/anomalies
+IOT_GUARD_CLOUD_UPLINK_INTERFACE=eth0
+IOT_GUARD_CLOUD_API_TOKEN=replace-with-cloud-token
+IOT_GUARD_CLOUD_API_TIMEOUT_SECONDS=5
+```
+
+Each anomalous window is queued after its local SQLite record is committed and sent as JSON:
+
+```json
+{
+    "flag": "anomaly",
+    "risk_score": 0.46,
+    "network_features": {
+        "network_packets_all_count": 12.0,
+        "network_ttl_avg": 63.5
+    },
+    "device_id": "iot-example"
+}
+```
+
+`network_features` contains the complete unscaled feature map computed for the triggering window, not only the two example fields above. Delivery runs on a bounded background queue so cloud latency does not block capture or inference. Failed requests are logged; the local anomaly and risk update remain stored.
+
+Cloud sockets are bound to `IOT_GUARD_CLOUD_UPLINK_INTERFACE` with Linux `SO_BINDTODEVICE`. The collector rejects configurations where this interface equals `IOT_GUARD_HOTSPOT_INTERFACE`, and hotspot setup marks the IoT connection as never-default. With the defaults, IoT clients use `wlan0` while cloud API traffic uses `eth0`, keeping the two interface bandwidths separate.
 
 Risk is prioritization metadata, not proof that a device is compromised.
 

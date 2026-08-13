@@ -10,7 +10,7 @@
 <body>
   <header class="topbar detail-bar">
     <div><a class="back" href="/">← All devices</a><h1>{{ device.hostname or 'Unnamed IoT device' }}</h1><p class="device-id">{{ device.device_id }}</p></div>
-    <div class="risk-number {{ device.risk_level }}"><strong>{{ '%.0f'|format(device.risk_score) }}</strong><span>{{ device.risk_level }} risk</span></div>
+    <div class="risk-number {{ device.risk_level }}"><strong>{{ '%.2f'|format(device.risk_score) }}</strong><span>{{ device.risk_level }} risk</span></div>
   </header>
   <main>
     <section class="facts">
@@ -27,7 +27,7 @@
         {% for event in events %}
           <tr class="{{ 'anomaly-row' if event.decision == 'anomaly' else '' }}">
             <td>{{ event.observed_at[:19]|replace('T', ' ') }}</td><td>{{ event.decision }}</td><td>{{ event.anomaly_type|replace('_', ' ') }}</td>
-            <td>{{ '%.2f'|format(event.point_score or 0) }}</td><td>{{ '%.2f'|format(event.temporal_score or 0) }}</td><td>{{ '%.2f'|format(event.ensemble_score or 0) }}</td><td>{{ '%.0f'|format(event.risk_after) }}</td>
+            <td>{{ '%.2f'|format(event.point_score or 0) }}</td><td>{{ '%.2f'|format(event.temporal_score or 0) }}</td><td>{{ '%.2f'|format(event.ensemble_score or 0) }}</td><td>{{ '%.2f'|format(event.risk_after) }}</td>
           </tr>
         {% else %}<tr><td colspan="7" class="empty">No inference results yet.</td></tr>{% endfor %}
         </tbody>

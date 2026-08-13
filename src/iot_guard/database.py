@@ -18,7 +18,9 @@ CREATE TABLE IF NOT EXISTS devices (
     connected INTEGER NOT NULL DEFAULT 1,
     risk_score REAL NOT NULL DEFAULT 0,
     risk_level TEXT NOT NULL DEFAULT 'low',
-    risk_updated_at TEXT
+    risk_updated_at TEXT,
+    risk_date TEXT,
+    consecutive_anomalies INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS anomaly_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,6 +60,20 @@ CREATE TABLE IF NOT EXISTS service_logs (
     message TEXT NOT NULL,
     details_json TEXT NOT NULL DEFAULT '{}'
 );
+CREATE TABLE IF NOT EXISTS healing_action_requests (
+    request_id TEXT PRIMARY KEY,
+    action_id TEXT NOT NULL,
+    device_id TEXT NOT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'queued',
+    requested_at TEXT NOT NULL,
+    started_at TEXT,
+    completed_at TEXT,
+    parameters_json TEXT NOT NULL DEFAULT '{}',
+    result_json TEXT,
+    error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_healing_requests_status_time
+ON healing_action_requests(status, requested_at);
 """
 
 
@@ -96,6 +112,15 @@ class Database:
                 connection.execute("ALTER TABLE anomaly_events ADD COLUMN model_version TEXT")
             if "raw_score" not in columns:
                 connection.execute("ALTER TABLE anomaly_events ADD COLUMN raw_score REAL")
+            device_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(devices)")
+            }
+            if "risk_date" not in device_columns:
+                connection.execute("ALTER TABLE devices ADD COLUMN risk_date TEXT")
+            if "consecutive_anomalies" not in device_columns:
+                connection.execute(
+                    "ALTER TABLE devices ADD COLUMN consecutive_anomalies INTEGER NOT NULL DEFAULT 0"
+                )
 
     def upsert_device(
         self, device_id: str, mac_fingerprint: str, hostname: str | None, ipv4: str | None
@@ -126,24 +151,35 @@ class Database:
                 tuple(active_ids),
             )
 
-    def device_risk(self, device_id: str) -> tuple[float, datetime | None]:
+    def device_risk(self, device_id: str) -> tuple[float, datetime | None, int]:
         with self.connect() as connection:
             row = connection.execute(
-                "SELECT risk_score, risk_updated_at FROM devices WHERE device_id = ?", (device_id,)
+                """SELECT risk_score, risk_updated_at, consecutive_anomalies
+                FROM devices WHERE device_id = ?""",
+                (device_id,),
             ).fetchone()
         if row is None:
-            return 0.0, None
+            return 0.0, None, 0
         updated = datetime.fromisoformat(row["risk_updated_at"]) if row["risk_updated_at"] else None
-        return float(row["risk_score"]), updated
+        return float(row["risk_score"]), updated, int(row["consecutive_anomalies"])
 
     def record_inference(self, device_id: str, observed_at: str, result: dict, risk) -> None:
         with self.connect() as connection:
             connection.execute(
                 """
-                UPDATE devices SET risk_score = ?, risk_level = ?, risk_updated_at = ?, last_seen = ?
+                UPDATE devices SET risk_score = ?, risk_level = ?, risk_updated_at = ?,
+                    risk_date = ?, consecutive_anomalies = ?, last_seen = ?
                 WHERE device_id = ?
                 """,
-                (risk.current, risk.level, observed_at, observed_at, device_id),
+                (
+                    risk.current,
+                    risk.level,
+                    observed_at,
+                    datetime.fromisoformat(observed_at).astimezone(timezone.utc).date().isoformat(),
+                    risk.consecutive_anomalies,
+                    observed_at,
+                    device_id,
+                ),
             )
             connection.execute(
                 """
@@ -190,6 +226,79 @@ class Database:
                 (utc_now(), level, component, message, json.dumps(details or {})),
             )
 
+    def create_healing_request(
+        self, request_id: str, action_id: str, device_id: str, parameters: dict
+    ) -> dict | None:
+        now = utc_now()
+        with self.connect() as connection:
+            device = connection.execute(
+                "SELECT device_id FROM devices WHERE device_id = ?", (device_id,)
+            ).fetchone()
+            if device is None:
+                return None
+            connection.execute(
+                """INSERT INTO healing_action_requests(
+                    request_id, action_id, device_id, requested_at, parameters_json
+                ) VALUES (?, ?, ?, ?, ?)""",
+                (request_id, action_id, device_id, now, json.dumps(parameters)),
+            )
+        return self.healing_request(request_id)
+
+    def healing_request(self, request_id: str) -> dict | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM healing_action_requests WHERE request_id = ?", (request_id,)
+            ).fetchone()
+        return self._healing_request_dict(row) if row is not None else None
+
+    def claim_healing_request(self) -> dict | None:
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """SELECT r.*, d.ipv4, d.connected FROM healing_action_requests r
+                JOIN devices d USING(device_id)
+                WHERE r.status = 'queued' ORDER BY r.requested_at LIMIT 1"""
+            ).fetchone()
+            if row is None:
+                return None
+            started_at = utc_now()
+            connection.execute(
+                """UPDATE healing_action_requests SET status = 'running', started_at = ?
+                WHERE request_id = ? AND status = 'queued'""",
+                (started_at, row["request_id"]),
+            )
+        claimed = dict(row)
+        claimed["status"] = "running"
+        claimed["started_at"] = started_at
+        claimed["parameters"] = json.loads(claimed.pop("parameters_json"))
+        return claimed
+
+    def complete_healing_request(
+        self, request_id: str, status: str, result: dict | None = None, error: str | None = None
+    ) -> None:
+        if status not in {"succeeded", "failed"}:
+            raise ValueError(f"Invalid terminal healing action status: {status}")
+        with self.connect() as connection:
+            connection.execute(
+                """UPDATE healing_action_requests
+                SET status = ?, completed_at = ?, result_json = ?, error = ?
+                WHERE request_id = ? AND status = 'running'""",
+                (
+                    status,
+                    utc_now(),
+                    json.dumps(result) if result is not None else None,
+                    error,
+                    request_id,
+                ),
+            )
+
+    @staticmethod
+    def _healing_request_dict(row: sqlite3.Row) -> dict:
+        item = dict(row)
+        item["parameters"] = json.loads(item.pop("parameters_json"))
+        item["result"] = json.loads(item.pop("result_json")) if item["result_json"] else None
+        return item
+
     def dashboard(self) -> dict:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
         with self.connect() as connection:
@@ -204,7 +313,7 @@ class Database:
             counts = dict(connection.execute(
                 """SELECT COUNT(*) AS total,
                     SUM(connected) AS connected,
-                    SUM(CASE WHEN risk_score >= 50 THEN 1 ELSE 0 END) AS elevated
+                    SUM(CASE WHEN risk_score >= 0.50 THEN 1 ELSE 0 END) AS elevated
                     FROM devices"""
             ).fetchone())
             recent = [dict(row) for row in connection.execute(
@@ -230,6 +339,17 @@ class Database:
                 (device_id,),
             )]
         return {"device": dict(row), "events": events, "windows": windows}
+
+    def reset_daily_risk(self, now: datetime | None = None) -> int:
+        current_date = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).date().isoformat()
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """UPDATE devices SET risk_score = 0, risk_level = 'low',
+                    risk_updated_at = NULL, risk_date = ?, consecutive_anomalies = 0
+                WHERE risk_date IS NULL OR risk_date <> ?""",
+                (current_date, current_date),
+            )
+        return cursor.rowcount
 
     def cleanup(self, retention_days: int) -> None:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()

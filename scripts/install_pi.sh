@@ -16,7 +16,7 @@ if [[ $(uname -m) != aarch64 ]]; then
 fi
 
 apt-get update
-apt-get install -y python3-venv python3-dev libopenblas-dev network-manager iw tcpdump acl openssh-server
+apt-get install -y python3-venv python3-dev libopenblas-dev network-manager iw tcpdump nftables acl openssh-server
 id "$SERVICE_USER" >/dev/null 2>&1 || useradd --system --home "$STATE_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
 install -d -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR"
 install -d -m 0750 -o root -g "$SERVICE_USER" "$CONFIG_DIR"
@@ -28,6 +28,9 @@ find /var/lib/NetworkManager -maxdepth 1 -type f -name 'dnsmasq-*.leases' \
 cp -a "$ROOT/src" "$ROOT/pyproject.toml" "$ROOT/README.md" "$INSTALL_DIR/"
 cp -a "$ROOT/model" "$INSTALL_DIR/model"
 cp "$ROOT/.env.example" "$CONFIG_DIR/iot-guard.env"
+HEALING_API_TOKEN=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+sed -i "s/^IOT_GUARD_HEALING_API_TOKEN=.*/IOT_GUARD_HEALING_API_TOKEN=$HEALING_API_TOKEN/" \
+  "$CONFIG_DIR/iot-guard.env"
 head -c 32 /dev/urandom > "$CONFIG_DIR/device-id.key"
 chown root:"$SERVICE_USER" "$CONFIG_DIR/device-id.key" "$CONFIG_DIR/iot-guard.env"
 chmod 0640 "$CONFIG_DIR/device-id.key" "$CONFIG_DIR/iot-guard.env"

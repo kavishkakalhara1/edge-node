@@ -7,12 +7,14 @@ import time
 import uuid
 from collections import deque
 from dataclasses import dataclass
-from datetime import timezone
+from datetime import datetime, timezone
 
 from .capture import CaptureService
+from .cloud import CloudReporter
 from .config import Settings
 from .database import Database
 from .features import FeatureEngine, PacketObservation, WindowRecord
+from .healing import HealingWorker, NftablesHealingExecutor
 from .identity import DeviceIdentity
 from .leases import LeaseRegistry
 from .model import ProductionEnsemble
@@ -85,25 +87,42 @@ class Collector:
         self.capture = CaptureService(
             settings.capture_interfaces, self.leases, self._packet_ready
         )
+        self.healing = HealingWorker(self.database, NftablesHealingExecutor())
+        self.cloud = CloudReporter(
+            settings.cloud_api_endpoint,
+            settings.cloud_uplink_interface,
+            token=settings.cloud_api_token,
+            timeout_seconds=settings.cloud_api_timeout_seconds,
+        )
         self.stop_event = threading.Event()
         self.last_cleanup = 0.0
+        self.risk_date = datetime.now(timezone.utc).date()
 
     def start(self) -> None:
         self.database.initialize()
+        self.database.reset_daily_risk()
         self.refresh_devices()
         self.capture.start()
         LOGGER.info("Collector started with model artifact %s", self.model.metadata["artifact_version"])
         try:
             while not self.stop_event.wait(1.0):
                 now = time.time()
+                current_date = datetime.now(timezone.utc).date()
+                if current_date != self.risk_date:
+                    self.database.reset_daily_risk()
+                    self.risk_date = current_date
                 self.features.tick(now)
                 self.windows.clear_stale(now)
                 self.refresh_devices()
+                for _ in range(10):
+                    if not self.healing.process_one():
+                        break
                 if now - self.last_cleanup >= 3600:
                     self.database.cleanup(self.settings.retention_days)
                     self.last_cleanup = now
         finally:
             self.capture.stop()
+            self.cloud.close()
             LOGGER.info("Collector stopped")
 
     def stop(self, *_args) -> None:
@@ -129,7 +148,7 @@ class Collector:
         self.features.ingest(device_id, packet)
 
     def _ratios(self, result: dict) -> dict:
-        return {
+        enriched = {
             **result,
             "point_ratio": float(result.get("point_score") or 0.0)
             / max(float(self.model.metadata["point_threshold"]), 1e-9),
@@ -138,18 +157,39 @@ class Collector:
             "fused_ratio": float(result.get("ensemble_score") or 0.0)
             / max(float(self.model.metadata["ensemble_threshold"]), 1e-9),
         }
+        evidence_ratio = max(
+            enriched["point_ratio"], enriched["temporal_ratio"], enriched["fused_ratio"]
+        )
+        normalized_evidence = evidence_ratio / (1.0 + evidence_ratio)
+        enriched["gru_score"] = normalized_evidence
+        enriched["svdd_score"] = normalized_evidence
+        return enriched
 
-    def _store_result(self, device_id: str, observed_at: str, result: dict) -> None:
+    def _store_result(
+        self,
+        device_id: str,
+        observed_at: str,
+        result: dict,
+        network_features: dict[str, float],
+    ) -> None:
         enriched = self._ratios(result)
-        current, updated_at = self.database.device_risk(device_id)
+        current, updated_at, consecutive_anomalies = self.database.device_risk(device_id)
         risk = update_risk(
             current,
             updated_at,
             enriched,
-            half_life_hours=self.settings.risk_half_life_hours,
+            consecutive_anomalies=consecutive_anomalies,
         )
         self.database.record_inference(device_id, observed_at, enriched, risk)
         if enriched.get("is_anomaly"):
+            self.cloud.submit(
+                {
+                    "flag": "anomaly",
+                    "risk_score": risk.current,
+                    "network_features": dict(network_features),
+                    "device_id": device_id,
+                }
+            )
             LOGGER.warning(
                 "Anomaly device=%s type=%s risk=%.1f",
                 device_id,
@@ -220,7 +260,7 @@ class Collector:
             "raw_threshold": score["raw_threshold"],
             "model_version": score["model_version"],
         }
-        self._store_result(window.device_id, observed_at, result)
+        self._store_result(window.device_id, observed_at, result, window.features)
 
 
 def main() -> None:

@@ -1,0 +1,145 @@
+\begin{thebibliography}{10}
+
+\bibitem{Antonakakis2017}
+M.~Antonakakis, T.~April, M.~Bailey, M.~Bernhard, E.~Bursztein, J.~Cochran, Z.~Durumeric, J.~A. Halderman, L.~Invernizzi, M.~Kallitsis, D.~Kumar, C.~Lever, Z.~Ma, J.~Mason, D.~Menscher, C.~Seaman, N.~Sullivan, K.~Thomas, and Y.~Zhou, ``Understanding the {M}irai botnet,'' in {\em Proc. 26th USENIX Security Symp.}, (Vancouver, BC, Canada), pp.~1093--1110, 2017.
+
+\bibitem{Lundberg2017}
+S.~M. Lundberg and S.-I. Lee, ``A unified approach to interpreting model predictions,'' in {\em Advances in Neural Information Processing Systems 30}, (Long Beach, CA, USA), pp.~4765--4774, 2017.
+
+\bibitem{IoTAnalytics2025}
+{IoT Analytics}, ``State of {IoT} 2025: Number of connected {IoT} devices growing 14\% to 21.1 billion.'' IoT Analytics GmbH, Hamburg, Germany. \url{https://iot-analytics.com/number-connected-iot-devices/}, Oct. 2025.
+
+\bibitem{Bormann2014}
+C.~Bormann, M.~Ersue, and A.~Ker{\"a}nen, ``Terminology for constrained-node networks,'' Tech. Rep. RFC 7228, Internet Engineering Task Force, May 2014.
+
+\bibitem{Forescout2025}
+{Forescout Research -- Vedere Labs}, ``Riskiest connected devices of 2025,'' tech. rep., Forescout Technologies, San Jose, CA, USA, Apr. 2025.
+
+\bibitem{Cloudflare2025Q3}
+{Cloudflare}, ``Cloudflare {DDoS} threat report for 2025 {Q3},'' tech. rep., Cloudflare Inc., Nov. 2025.
+
+\bibitem{Kovacs2025}
+E.~Kovacs, ``Aisuru botnet powers record {DDoS} attack peaking at 29 {Tbps}.'' SecurityWeek, Dec. 2025.
+
+\bibitem{Cloudflare2026Q4}
+{Cloudflare}, ``Cloudflare {DDoS} threat report for 2025 {Q4},'' tech. rep., Cloudflare Inc., 2026.
+
+\bibitem{Semperis2025}
+{Semperis}, ``The state of critical infrastructure resilience: Evaluating cyber threats to water and electric utilities,'' tech. rep., Semperis, Apr. 2025.
+
+\bibitem{Mandiant2025}
+{Mandiant / Google Cloud}, ``{M-Trends} 2025: Data, insights, and recommendations from the frontlines,'' tech. rep., Google Cloud, Apr. 2025.
+
+\bibitem{Mandiant2026}
+{Mandiant / Google Cloud}, ``{M-Trends} 2026,'' tech. rep., Google Cloud, Mar. 2026.
+
+\bibitem{IBM2025}
+{IBM Security and Ponemon Institute}, ``Cost of a data breach report 2025,'' tech. rep., IBM Corporation, 2025.
+
+\bibitem{Tariq2025}
+S.~Tariq, M.~B. Chhetri, S.~Nepal, and C.~Paris, ``Alert fatigue in security operations centres: Research challenges and opportunities,'' {\em ACM Computing Surveys}, vol.~57, pp.~224:1--224:38, Apr. 2025.
+
+\bibitem{SANS2025}
+{SANS Institute}, ``2025 sans detection and response survey,'' tech. rep., SANS Institute, 2025.
+
+\bibitem{ISC22025}
+{ISC2}, ``2025 {ISC2} cybersecurity workforce study,'' tech. rep., ISC2, Dec. 2025.
+
+\bibitem{UKPSTI2023}
+{United Kingdom}, ``The product security and telecommunications infrastructure (security requirements for relevant connectable products) regulations 2023.'' SI 2023/1007, United Kingdom, in force 29 Apr. 2024, 2023.
+
+\bibitem{EU2024CRA}
+{European Parliament and Council}, ``Regulation (eu) 2024/2847 of the european parliament and of the council of 23 october 2024 on horizontal cybersecurity requirements for products with digital elements (cyber resilience act).'' Official Journal of the European Union, OJ L, 2024/2847, 20 Nov. 2024, 2024.
+
+\bibitem{Fagan2020}
+M.~Fagan, K.~N. Megas, K.~Scarfone, and M.~Smith, ``Foundational cybersecurity activities for {IoT} device manufacturers,'' Tech. Rep. NISTIR 8259, National Institute of Standards and Technology, Gaithersburg, MD, USA, May 2020.
+
+\bibitem{ETSI303645}
+{ETSI}, ``{CYBER}; cyber security for consumer internet of things: Baseline requirements,'' Tech. Rep. ETSI EN 303 645, European Telecommunications Standards Institute, 2020.
+
+\bibitem{Oriaro2025}
+S.~Oriaro and S.~Mishra, ``Improving cybersecurity through explainable artificial intelligence: A systematic literature review,'' {\em Issues in Information Systems}, vol.~26, no.~3, pp.~387--400, 2025.
+
+\bibitem{Firouzi2025}
+A.~Firouzi, S.~Dadkhah, S.~A. Maret, and A.~A. Ghorbani, ``{DataSense}: A real-time sensor-based benchmark dataset for attack analysis in {IIoT} with multi-objective feature selection,'' {\em Electronics}, vol.~14, p.~4095, 2025.
+
+\bibitem{Jain2024}
+A.~K. Jain, H.~Shukla, and D.~Goel, ``A comprehensive survey on {DDoS} detection, mitigation, and defense strategies in software-defined networks,'' {\em Cluster Computing}, vol.~27, pp.~13129--13164, 2024.
+
+\bibitem{McMahan2017}
+H.~B. McMahan, E.~Moore, D.~Ramage, S.~Hampson, and B.~A. y~Arcas, ``Communication-efficient learning of deep networks from decentralized data,'' in {\em Proc. 20th International Conference on Artificial Intelligence and Statistics (AISTATS)}, vol.~54 of {\em PMLR}, pp.~1273--1282, 2017.
+
+\bibitem{HernandezRamos2025}
+J.~L. Hernandez-Ramos, G.~Karopoulos, E.~Chatzoglou, V.~Kouliaridis, E.~Marmol, A.~Gonzalez-Vidal, and G.~Kambourakis, ``Intrusion detection based on federated learning: A systematic review,'' {\em ACM Computing Surveys}, vol.~57, pp.~Article 309, 1--65, Jul. 2025.
+
+\bibitem{Gamlo2026}
+A.~Gamlo, S.~Sharaf, and R.~Molla, ``Efficient {CNN--GRU} transfer learning for edge {IoT} intrusion detection,'' {\em Electronics}, vol.~15, no.~5, p.~981, 2026.
+
+\bibitem{Yao2023}
+W.~Yao, L.~Hu, Y.~Hou, and X.~Li, ``A lightweight intelligent network intrusion detection system using one-class autoencoder and ensemble learning for {IoT},'' {\em Sensors}, vol.~23, no.~8, p.~4141, 2023.
+
+\bibitem{Liu2008}
+F.~T. Liu, K.~M. Ting, and Z.-H. Zhou, ``Isolation forest,'' in {\em Proc. 8th IEEE International Conference on Data Mining (ICDM'08)}, pp.~413--422, 2008.
+
+\bibitem{Sadaf2020}
+K.~Sadaf and J.~Sultana, ``Intrusion detection based on autoencoder and isolation forest in fog computing,'' {\em IEEE Access}, vol.~8, pp.~167059--167068, 2020.
+
+\bibitem{Ruff2018}
+L.~Ruff, R.~A. Vandermeulen, N.~G{\"o}rnitz, L.~Deecke, S.~A. Siddiqui, A.~Binder, E.~M{\"u}ller, and M.~Kloft, ``Deep one-class classification,'' in {\em Proc. 35th International Conference on Machine Learning (ICML)}, vol.~80 of {\em PMLR}, pp.~4393--4402, 2018.
+
+\bibitem{Lu2018}
+J.~Lu, A.~Liu, F.~Dong, F.~Gu, J.~Gama, and G.~Zhang, ``Learning under concept drift: A review,'' {\em IEEE Transactions on Knowledge and Data Engineering}, vol.~31, no.~12, pp.~2346--2363, 2018.
+
+\bibitem{Sama2025}
+N.~U. Sama, S.~Ullah, S.~M.~A. Kazmi, and M.~Mazzara, ``Cutting-edge intrusion detection in {IoT} networks: A focus on ensemble models,'' {\em IEEE Access}, vol.~13, pp.~8375--8392, 2025.
+
+\bibitem{Ogunseyi2026}
+T.~B. Ogunseyi, G.~Thiyagarajan, H.~He, V.~Bist, and Z.~Du, ``Performance analysis of explainable deep learning-based intrusion detection systems for {IoT} networks: A systematic review,'' {\em Sensors}, vol.~26, no.~2, p.~363, 2026.
+
+\bibitem{Manju2025}
+Manju and V.~K. Srivastava, ``{AI}-integrated self-healing system for robust fault detection and automatic recovery in {IoT} environments,'' {\em International Journal of Innovative Science and Research Technology}, vol.~10, no.~12, pp.~1947--1958, 2025.
+
+\bibitem{Nageshwaran2026}
+V.~Nageshwaran and S.~Ezekiel, ``Agentic {AI} and large language models for autonomous {IoT} cybersecurity: A systematic survey, taxonomy, and research roadmap,'' {\em Electronics}, vol.~15, no.~12, p.~2740, 2026.
+
+\bibitem{Vinay2025}
+V.~Vinay, ``The evolution of agentic {AI} in cybersecurity: From single {LLM} reasoners to multi-agent systems and autonomous pipelines,'' 2025.
+\newblock arXiv:2512.06659.
+
+\bibitem{Lewis2020}
+P.~Lewis, E.~Perez, A.~Piktus, F.~Petroni, V.~Karpukhin, N.~Goyal, H.~K{\"u}ttler, M.~Lewis, W.~Yih, T.~Rockt{\"a}schel, S.~Riedel, and D.~Kiela, ``Retrieval-augmented generation for knowledge-intensive {NLP} tasks,'' in {\em Advances in Neural Information Processing Systems 33 (NeurIPS 2020)}, pp.~9459--9474, 2020.
+
+\bibitem{Swileh2025}
+M.~N. Swileh and S.~Zhang, ``Proactive {DDoS} detection and mitigation in decentralized software-defined networking via port-level monitoring and zero-training large language models.'' arXiv preprint arXiv:2511.00460, 2025.
+
+\bibitem{Swileh2026}
+M.~N. Swileh, S.~Zhang, and K.~Lei, ``Intelligent detection and mitigation of carpet-bombing {DDoS} attacks in {SDN} using retrieval-augmented generation and large language models.'' arXiv preprint arXiv:2605.26307, 2026.
+
+\bibitem{IslamSaha2026}
+M.~N.~B. Islam and S.~Saha, ``From detection to response: A deep learning and retrieval-augmented generation framework for network intrusion mitigation.'' arXiv preprint arXiv:2605.17960, 2026.
+
+\bibitem{Zhang2025}
+H.~Zhang, J.~Ye, W.~Huang, X.~Liu, and J.~Gu, ``Survey of federated learning in intrusion detection,'' {\em Journal of Parallel and Distributed Computing}, vol.~195, p.~104976, Jan. 2025.
+
+\bibitem{Mothukuri2021}
+V.~Mothukuri, R.~M. Parizi, S.~Pouriyeh, Y.~Huang, A.~Dehghantanha, and G.~Srivastava, ``A survey on security and privacy of federated learning,'' {\em Future Generation Computer Systems}, vol.~115, pp.~619--640, 2021.
+
+\bibitem{Rajapakse2023}
+V.~Rajapakse, I.~Karunanayake, and N.~Ahmed, ``Intelligence at the extreme edge: A survey on reformable {TinyML},'' {\em ACM Computing Surveys}, vol.~55, no.~13s, pp.~1--30, 2023.
+
+\bibitem{Heydari2025}
+S.~Heydari and Q.~H. Mahmoud, ``Tiny machine learning and on-device inference: A survey of applications, challenges, and future directions,'' {\em Sensors}, vol.~25, no.~10, p.~3191, 2025.
+
+\bibitem{Cho2014}
+K.~Cho, B.~van Merri{\"e}nboer, C.~Gulcehre, D.~Bahdanau, F.~Bougares, H.~Schwenk, and Y.~Bengio, ``Learning phrase representations using {RNN} encoder--decoder for statistical machine translation,'' in {\em Proc. 2014 Conference on Empirical Methods in Natural Language Processing (EMNLP)}, (Doha, Qatar), pp.~1724--1734, 2014.
+
+\bibitem{Tieleman2012}
+T.~Tieleman and G.~Hinton, ``Lecture 6.5-rmsprop: Divide the gradient by a running average of its recent magnitude.'' COURSERA: Neural Networks for Machine Learning, 2012.
+
+\bibitem{Tax2004}
+D.~M.~J. Tax and R.~P.~W. Duin, ``Support vector data description,'' {\em Machine Learning}, vol.~54, no.~1, pp.~45--66, 2004.
+
+\bibitem{ChenGuestrin2016}
+T.~Chen and C.~Guestrin, ``{XGBoost}: A scalable tree boosting system,'' in {\em Proc. 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining (KDD)}, pp.~785--794, 2016.
+
+\end{thebibliography}

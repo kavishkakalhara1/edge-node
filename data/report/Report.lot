@@ -1,0 +1,25 @@
+\gdef \the@ipfilectr {@-1}
+\gdef \the@ipfilectr {}
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {3.1}{\ignorespaces Complete edge-layer feature register: the 36 statistical and behavioral descriptors computed per traffic window and consumed by the GRU + Deep SVDD ensemble.}}{22}{table.3.1}%
+\contentsline {table}{\numberline {3.3}{\ignorespaces Project budget and representative IoT-device inventory for the edge-gateway prototype.}}{39}{table.3.3}%
+\contentsline {table}{\numberline {3.2}{\ignorespaces Project timeline and progress by week (shaded cells indicate the completed period for each milestone).}}{41}{table.caption.13}%
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {4.1}{\ignorespaces Performance comparison of the proposed GRU + Deep SVDD ensemble against eight baseline models on the same held-out evaluation data.}}{44}{table.caption.15}%
+\contentsline {table}{\numberline {4.2}{\ignorespaces Confusion matrix and per-class detection metrics for the proposed GRU + Deep SVDD ensemble at its selected operating threshold.}}{46}{table.caption.18}%
+\contentsline {table}{\numberline {4.3}{\ignorespaces On-device inference benchmark for the deployed fused GRU + Deep SVDD ensemble on the target Raspberry Pi-class gateway, across candidate CPU-thread configurations (1{,}000 measured inferences after 50 warm-up runs); all latency values are reported in milliseconds.}}{47}{table.caption.21}%
+\contentsline {table}{\numberline {4.4}{\ignorespaces Offline validation performance of five candidate classifiers at the 8-category grouped-label granularity, evaluated on the CIC IIoT 2025 dataset with its complete native feature set.}}{48}{table.caption.22}%
+\contentsline {table}{\numberline {4.5}{\ignorespaces Self-healing mechanics verified by live, HTTP-driven testing against the full cloud pipeline.}}{60}{table.caption.32}%
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {A.1}{\ignorespaces Healing action catalogue: every atomic action available to the Pi 5 gateway, grouped by mechanism.}}{75}{table.A.1}%
+\contentsline {table}{\numberline {A.2}{\ignorespaces Benign playbook: tiers B0--B4.}}{79}{table.A.2}%
+\contentsline {table}{\numberline {A.3}{\ignorespaces DDoS playbook: priority tiers P1--P6 plus the parallel observation track.}}{80}{table.A.3}%
+\contentsline {table}{\numberline {A.4}{\ignorespaces DoS playbook: priority tiers P1--P6 plus the parallel observation track.}}{81}{table.A.4}%
+\contentsline {table}{\numberline {A.5}{\ignorespaces Reconnaissance playbook: priority tiers P1--P6.}}{81}{table.A.5}%
+\contentsline {table}{\numberline {A.6}{\ignorespaces Web playbook: priority tiers P1--P6.}}{82}{table.A.6}%
+\contentsline {table}{\numberline {A.7}{\ignorespaces Brute Force playbook: priority tiers P1--P6.}}{83}{table.A.7}%
+\contentsline {table}{\numberline {A.8}{\ignorespaces MITM (Man-in-the-Middle) playbook: priority tiers P1--P6.}}{84}{table.A.8}%
+\contentsline {table}{\numberline {A.9}{\ignorespaces Malware (Mirai) playbook: priority tiers P1--P6 plus the parallel observation track.}}{85}{table.A.9}%
