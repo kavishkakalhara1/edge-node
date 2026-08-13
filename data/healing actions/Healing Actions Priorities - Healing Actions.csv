@@ -1,0 +1,42 @@
+Healing Action Catalogue,,,,,,,
+,,,,,,,
+,,,,,,,
+ID,Group,Action,Mechanism on the Pi 5 gateway,Typical level,Reversible,Default TTL,Approval req.
+NET-01,Network and traffic control,Adaptive rate limiting,Per-source token-bucket / connection-rate limit on the gateway firewall for the offending 5-tuple or source.,P2,Yes,15 min,No
+NET-02,Network and traffic control,Flood-specific hardening,"SYN cookies, half-open connection caps, conntrack table limits, ICMP/UDP rate caps.",P2,Yes,Standing,No
+NET-03,Network and traffic control,Temporary source block,Drop/blackhole the attacking source address with an escalating TTL (5 -> 15 -> 60 min).,P3,Yes,5-60 min,No
+NET-04,Network and traffic control,Port / protocol block,Close the abused destination port or protocol at the gateway for that device.,P3,Yes,60 min,No
+NET-05,Network and traffic control,Probe and scan filtering,Drop unsolicited SYN/FIN/NULL/Xmas probes and ICMP sweeps; suppress port-unreachable replies.,P2,Yes,Standing,No
+NET-06,Network and traffic control,Egress and C2 blocking,Deny outbound to the observed command-and-control endpoint; DNS sinkhole the domain on the local resolver.,P2,Yes,Standing,No
+NET-07,Network and traffic control,Aggregate source block,"Block the offending prefix / subnet when many sources share it, instead of thousands of single rules.",P3,Yes,60 min,No
+NET-08,Network and traffic control,Traffic shaping,Fair-queue and cap the victim device's share of uplink so the flood cannot starve neighbouring devices.,P2,Yes,30 min,No
+SEG-01,Segmentation and L2 integrity,Quarantine VLAN,Move the device to an isolated VLAN that reaches only the gateway (management and telemetry only).,P4,Yes,Timed release,No
+SEG-02,Segmentation and L2 integrity,MAC-level block,Drop frames from the offending MAC at the bridge; deauthenticate / disassociate the wireless client.,P3,Yes,60 min,No
+SEG-03,Segmentation and L2 integrity,Full isolation,Deny all traffic to and from the device except the controller heartbeat channel.,P4,Yes,Manual,No
+L2-01,Segmentation and L2 integrity,ARP truth restoration,Install static ARP bindings for gateway and device; broadcast corrective gratuitous ARP; flush poisoned caches.,P1,Yes,Standing,No
+L2-02,Segmentation and L2 integrity,ARP / DHCP inspection,Enable dynamic ARP inspection and DHCP snooping; drop offers from any non-authorised server.,P2,Yes,Standing,No
+L2-03,Segmentation and L2 integrity,Force encrypted channel,Reject plaintext HTTP / MQTT / DNS for that device; pin traffic to TLS and to the gateway's DoT resolver.,P3,Yes,Standing,No
+L2-04,Segmentation and L2 integrity,Re-key and re-provision,"Rotate PSK, re-issue device certificate, invalidate key material that may have been observed.",P5,No,n/a,No
+ACC-01,"Access, credentials, sessions",Progressive source ban,Ban the source after N failed authentications with exponential back-off (jail-style rule set).,P1,Yes,5 min - 24 h,No
+ACC-02,"Access, credentials, sessions",Target account lockout,Lock or throttle the specific account being guessed rather than the whole service.,P2,Yes,30 min,No
+ACC-03,"Access, credentials, sessions",Credential rotation,Force a new admin password / API token / MQTT credential for the device and its gateway record.,P4,No,n/a,No
+ACC-04,"Access, credentials, sessions",Harden authentication surface,"Disable Telnet and password login, enforce key or certificate auth, restrict management ports to a gateway allowlist.",P3,Partial,Standing,No
+ACC-05,"Access, credentials, sessions",Session and token revocation,"Kill active sessions, invalidate cookies and bearer tokens, force re-authentication.",P2,No,n/a,No
+SVC-01,Service and application layer,Service restart,Restart the affected daemon on the device or its gateway-side proxy to clear exhausted resources.,P3,n/a,n/a,No
+SVC-02,Service and application layer,Process kill and persistence removal,"Terminate the malicious process and remove its persistence (init entry, cron job, watchdog respawn).",P4,No,n/a,No
+SVC-03,Service and application layer,Virtual patch / WAF rule,"Insert a reverse-proxy rule at the gateway blocking the observed payload class (injection, traversal, upload abuse).",P2,Yes,Standing,No
+SVC-04,Service and application layer,Disable exposed function,"Turn off the vulnerable endpoint, remote web UI, UPnP, or other non-essential service.",P3,Yes,Standing,No
+SVC-05,Service and application layer,Request hygiene,"Tighten body size, header and timeout limits; enforce strict input validation at the proxy.",P2,Yes,Standing,No
+DEV-01,Device recovery,Network stack restart,Bounce the device's interface and re-DHCP without a full reboot.,P4,n/a,n/a,No
+DEV-02,Device recovery,Graceful reboot,Reboot via device API or SSH; clears memory-resident state.,P5,n/a,n/a,No
+DEV-03,Device recovery,Hard power cycle,"Toggle the smart plug, PoE port or GPIO relay feeding the device when it is unresponsive.",P5,n/a,n/a,No
+DEV-04,Device recovery,Golden-config restore,Push the last known-good configuration snapshot held by the gateway.,P5,Yes,n/a,No
+DEV-05,Device recovery,Factory reset and re-provision,"Reset to factory defaults, then re-provision inside quarantine with fresh unique credentials.",P6,No,n/a,YES
+DEV-06,Device recovery,Firmware re-flash / rollback,"Re-flash a signed known-good image, or roll back to the previous verified version.",P6,No,n/a,YES
+OBS-01,Observation and forensics,Extended capture,Start full packet capture and verbose host logging for the incident window (evidence; always parallel).,P1,Yes,Incident,No
+OBS-02,Observation and forensics,Honeypot / tarpit redirect,Redirect the attacker's flows to a deception service to profile behaviour without exposing the real device.,P2,Yes,Incident,No
+OBS-03,Observation and forensics,Sensitivity boost,Lower the detection threshold and shorten the inference window for this device temporarily.,P1,Yes,60 min,No
+OBS-04,Observation and forensics,Baseline update,Fold confirmed-benign behaviour back into the device profile / incremental model.,P1,Yes,n/a,No
+ESC-01,Escalation,Operator notification,Dashboard alert plus out-of-band message with the incident timeline and the actions already tried.,any,n/a,n/a,No
+ESC-02,Escalation,Permanent quarantine,Keep the device isolated pending manual review; block automatic release.,P6,Manual,Manual,YES
+ESC-03,Escalation,Incident report,"Generate machine- and human-readable reports, including the peer-device sweep results.",P6,n/a,n/a,No

@@ -1,22 +1,40 @@
 from __future__ import annotations
 
 import json
+import secrets
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
 
 from .config import Settings
 from .database import Database
+from .healing import SUPPORTED_ACTIONS
 
 PACKAGE_DIR = Path(__file__).parent
 settings = Settings.from_env()
 database = Database(settings.database_path)
 templates = Jinja2Templates(directory=PACKAGE_DIR / "templates")
+
+
+class HealingRequestBody(BaseModel):
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+
+def require_healing_token(x_iot_guard_token: str | None = Header(default=None)) -> None:
+    if not settings.healing_api_token:
+        raise HTTPException(status_code=503, detail="Healing API is not configured")
+    if x_iot_guard_token is None or not secrets.compare_digest(
+        x_iot_guard_token, settings.healing_api_token
+    ):
+        raise HTTPException(status_code=401, detail="Invalid healing API token")
 
 
 def latency_benchmark() -> dict | None:
@@ -63,6 +81,45 @@ def api_device(device_id: str):
     if data is None:
         raise HTTPException(status_code=404, detail="Device not found")
     return data
+
+
+@app.post(
+    "/api/devices/{device_id}/healing-actions/{action_id}",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def execute_healing_action(
+    device_id: str,
+    action_id: str,
+    body: HealingRequestBody,
+    x_iot_guard_token: str | None = Header(default=None),
+):
+    require_healing_token(x_iot_guard_token)
+    normalized_action_id = action_id.upper()
+    if normalized_action_id not in SUPPORTED_ACTIONS:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": f"Healing action {normalized_action_id} is not implemented",
+                "supported_action_ids": sorted(SUPPORTED_ACTIONS),
+            },
+        )
+    request = database.create_healing_request(
+        uuid.uuid4().hex, normalized_action_id, device_id, body.parameters
+    )
+    if request is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+    return request
+
+
+@app.get("/api/healing-actions/{request_id}")
+def healing_action_status(
+    request_id: str, x_iot_guard_token: str | None = Header(default=None)
+):
+    require_healing_token(x_iot_guard_token)
+    request = database.healing_request(request_id)
+    if request is None:
+        raise HTTPException(status_code=404, detail="Healing action request not found")
+    return request
 
 
 @app.get("/health")

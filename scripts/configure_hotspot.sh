@@ -4,6 +4,7 @@ set -euo pipefail
 SSID=${IOT_GUARD_HOTSPOT_SSID:-IoT-Guard}
 PASSPHRASE=${IOT_GUARD_HOTSPOT_PASSPHRASE:-}
 INTERFACE=${IOT_GUARD_HOTSPOT_INTERFACE:-wlan0}
+CLOUD_INTERFACE=${IOT_GUARD_CLOUD_UPLINK_INTERFACE:-eth0}
 CHANNEL=${IOT_GUARD_WIFI_CHANNEL:-6}
 CONNECTION=iot-guard-hotspot
 
@@ -13,6 +14,10 @@ if [[ $EUID -ne 0 ]]; then
 fi
 if [[ ${#PASSPHRASE} -lt 12 ]]; then
   echo "Set IOT_GUARD_HOTSPOT_PASSPHRASE to at least 12 characters." >&2
+  exit 1
+fi
+if [[ $INTERFACE == "$CLOUD_INTERFACE" ]]; then
+  echo "IoT hotspot and cloud uplink must use different interfaces." >&2
   exit 1
 fi
 command -v nmcli >/dev/null || { echo "NetworkManager/nmcli is required." >&2; exit 1; }
@@ -27,6 +32,7 @@ nmcli connection modify "$CONNECTION" \
   wifi-sec.psk "$PASSPHRASE" \
   ipv4.method shared \
   ipv4.addresses 10.42.0.1/24 \
+  ipv4.never-default yes \
   ipv6.method disabled \
   connection.autoconnect yes
 nmcli connection up "$CONNECTION"

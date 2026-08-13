@@ -21,8 +21,12 @@ class Settings:
     hotspot_subnet: str
     web_host: str
     web_port: int
+    healing_api_token: str
+    cloud_api_endpoint: str
+    cloud_uplink_interface: str
+    cloud_api_token: str
+    cloud_api_timeout_seconds: float
     retention_days: int
-    risk_half_life_hours: float
     model_cpu_threads: int
     model_buffer_timeout_seconds: float
     model_log_latency: bool
@@ -32,7 +36,7 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         state_dir = Path(os.getenv("IOT_GUARD_STATE_DIR", "/var/lib/iot-guard"))
-        return cls(
+        settings = cls(
             database_path=Path(os.getenv("IOT_GUARD_DATABASE", state_dir / "iot-guard.db")),
             artifact_dir=Path(os.getenv("IOT_GUARD_ARTIFACT_DIR", "/opt/iot-guard/model")),
             dhcp_lease_file=Path(
@@ -49,8 +53,14 @@ class Settings:
             hotspot_subnet=os.getenv("IOT_GUARD_HOTSPOT_SUBNET", "10.42.0.0/24"),
             web_host=os.getenv("IOT_GUARD_WEB_HOST", "0.0.0.0"),
             web_port=int(os.getenv("IOT_GUARD_WEB_PORT", "8080")),
+            healing_api_token=os.getenv("IOT_GUARD_HEALING_API_TOKEN", ""),
+            cloud_api_endpoint=os.getenv("IOT_GUARD_CLOUD_API_ENDPOINT", ""),
+            cloud_uplink_interface=os.getenv("IOT_GUARD_CLOUD_UPLINK_INTERFACE", "eth0"),
+            cloud_api_token=os.getenv("IOT_GUARD_CLOUD_API_TOKEN", ""),
+            cloud_api_timeout_seconds=float(
+                os.getenv("IOT_GUARD_CLOUD_API_TIMEOUT_SECONDS", "5")
+            ),
             retention_days=int(os.getenv("IOT_GUARD_RETENTION_DAYS", "30")),
-            risk_half_life_hours=float(os.getenv("IOT_GUARD_RISK_HALF_LIFE_HOURS", "6")),
             model_cpu_threads=int(os.getenv("IOT_GUARD_MODEL_CPU_THREADS", "2")),
             model_buffer_timeout_seconds=float(
                 os.getenv("IOT_GUARD_MODEL_BUFFER_TIMEOUT_SECONDS", "120")
@@ -61,3 +71,9 @@ class Settings:
             in {"1", "true", "yes"},
             model_max_latency_ms=float(os.getenv("IOT_GUARD_MODEL_MAX_LATENCY_MS", "0")),
         )
+        if (
+            settings.cloud_api_endpoint
+            and settings.cloud_uplink_interface == settings.hotspot_interface
+        ):
+            raise ValueError("Cloud uplink and IoT hotspot must use different interfaces")
+        return settings

@@ -55,7 +55,7 @@
                 <td>{{ device.ipv4 or '—' }}</td>
                 <td><span class="state {{ 'online' if device.connected else 'offline' }}">{{ 'online' if device.connected else 'offline' }}</span></td>
                 <td>{{ device.anomalies_24h }}</td>
-                <td><div class="risk"><span class="risk-bar {{ device.risk_level }}" style="width: {{ device.risk_score }}%"></span></div><b>{{ '%.0f'|format(device.risk_score) }}</b></td>
+                <td><div class="risk"><span class="risk-bar {{ device.risk_level }}" style="width: {{ device.risk_score * 100 }}%"></span></div><b>{{ '%.2f'|format(device.risk_score) }}</b></td>
               </tr>
             {% else %}
               <tr><td colspan="5" class="empty">No hotspot clients have been observed.</td></tr>
@@ -71,7 +71,7 @@
         {% for event in recent[:12] %}
           <li>
             <span class="alert-mark {{ event.anomaly_type }}"></span>
-            <div><a href="/devices/{{ event.device_id }}">{{ event.hostname or event.device_id }}</a><p>{{ event.anomaly_type|replace('_', ' ') }} · risk {{ '%.0f'|format(event.risk_after) }}</p></div>
+            <div><a href="/devices/{{ event.device_id }}">{{ event.hostname or event.device_id }}</a><p>{{ event.anomaly_type|replace('_', ' ') }} · risk {{ '%.2f'|format(event.risk_after) }}</p></div>
             <time>{{ event.observed_at[11:19] }}</time>
           </li>
         {% else %}

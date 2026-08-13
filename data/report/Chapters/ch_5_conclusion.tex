@@ -1,0 +1,92 @@
+\chapter{Conclusion and Future Work}\label{cha:conclusion}
+
+\section{Summary of the Research}
+
+As IoT ecosystems continue to scale and integrate into critical infrastructure, reactive and human-dependent security frameworks are no longer viable. This report presented a novel, self-healing security framework that leverages distributed intelligence to provide autonomous, closed-loop network resilience.
+
+By pushing a cascaded hybrid GRU-Deep SVDD ensemble to the edge, the system achieves highly accurate, temporal-aware anomaly detection while maintaining a lightweight footprint. The integration of a Two-Stage Rolling Risk Score ensures that only sustained threats trigger further analysis at the edge. In the cloud tier, the framework transforms traditional black-box classification by utilizing SHAP to feed explainable telemetry into a cognitive healing pipeline: a deterministic ladder engine handles the great majority of classified incidents by escalating through a prioritised playbook, while a pair of LLM-backed agents, grounded by a RAG-enabled knowledge base, are consulted only as a fallback-for classifications the ladder cannot map to a known attack class, or for incidents that exhaust their playbook-and generate the forensic reports and human-handoff briefs that accompany every incident. This cognitive tier dynamically adjusts its strategy based on real-time edge feedback, escalating or relaxing mitigations as the evidence for an incident strengthens or resolves.
+
+\section{Achievement of Objectives}
+
+Section 1.3 set out five objectives for this project. Each is assessed below against the evidence gathered in Chapter~\ref{cha:results}, distinguishing what was fully achieved from what was achieved only in part.
+
+\textbf{Objective 1-researching the feasibility of autonomic self-healing IoT security via a layered intelligence architecture-was substantively achieved.} A two-tier architecture was designed, implemented, and evaluated: a lightweight edge layer performing one-class anomaly detection and risk accumulation, and a cognitive cloud layer performing classification, explanation, and a deterministic-ladder-with-LLM-fallback healing decision. Every mechanic of that layered design passed live, HTTP-driven verification (Table 4.4), demonstrating that the layering itself-fast, local detection feeding a slower but more capable remediation tier-is a workable division of labour. The one respect in which this objective is not yet fully realised is that the two layers, as implemented, do not currently exchange data with one another in a deployed sense (Section 4.5.3); the layered architecture has been validated as a design and mechanically, but not yet as a single integrated system running end-to-end.
+
+\textbf{Objective 2-balancing fast response with dynamic thinking to contain threats in time and sustain long-term resiliency-was partially achieved.} The deterministic ladder engine supplies the fast-response half of this objective, escalating through a prioritised playbook in a fixed, auditable order (Section 3.5), while the LLM-backed Decision and Escalation Agents supply the dynamic-thinking half for the cases the ladder cannot resolve on its own. Long-term resiliency is supported by the benign-state decay mechanism, which relaxes mitigations once a threat genuinely passes rather than leaving a device restricted indefinitely. However, Section 4.3 shows that containment ``in time'' is only as reliable as the classification that triggers it: port scans, brute-force attempts, and Mirai-style scanning traffic were classified as benign at 90--98\% confidence across every volume tested, meaning that for these attack types the fast-response path is never actually entered. The balance the objective calls for is architecturally present but not yet reliably achieved in practice for every attack class evaluated.
+
+\textbf{Objective 3-supporting explainable and trustful decision-making through explainable AI procedures-was partially achieved.} SHAP-based feature attributions are computed for every classification and translated into structured, machine-consumable statements that are passed directly to the Dashboard Reporting Agent and, when consulted, to the Decision and Escalation Agents (Section 3.4), which is a genuine extension of XAI from a human-facing visualisation into a machine-to-machine interface. This mechanism functioned correctly wherever it was exercised. Trustworthiness, however, is undermined by the same root cause identified against Objective 2: an explanation is only as trustworthy as the decision it explains, and Section 4.3's findings on classifier accuracy-including cases where the explainer faithfully attributed a confident but incorrect classification-mean that the objective is met at the mechanism level without yet being met at the level of end-to-end decision trust.
+
+\textbf{Objective 4-researching the use of large language models to extrapolate to previously unknown and evolving attack patterns-was achieved for the mechanism, with the caveat that it was validated against structurally unhandled classifications rather than a genuinely novel attack held out from training.} The Decision Agent, grounded by RAG over the playbooks and device-specific documentation of Appendix A, was specifically designed to be consulted when a classification falls into the \texttt{unhandled\_attack} bucket or persists at low confidence (Section 3.5), and Table 4.4 confirms that this routing worked correctly and produced a coherent, grounded action rather than a free-composed one. This demonstrates the intended extrapolation mechanism functioning as designed. What it does not yet demonstrate is extrapolation to attacks entirely outside the training distribution, since the cases exercised were drawn from the same evaluation dataset's label space rather than from a held-out, genuinely zero-day traffic pattern; this distinction is carried forward as a limitation below.
+
+\textbf{Objective 5-creating a self-directed learning strategy for the ongoing revision of security policy-was achieved, following a defect found and corrected during evaluation.} The RAG knowledge base is designed to write every resolved incident's outcome back into its own retrieval corpus as a past action (Section 3.5), so that future incidents are grounded against an accumulating operational record rather than static playbooks alone. Live testing initially found this write-back broken for the explicit-verification-feedback path-the production path most incidents were expected to take-with only the silent no-redetection timeout path functioning; the defect was corrected during testing and confirmed via a real recorded entry (Table 4.4). With the fix in place, the self-directed learning strategy the objective calls for is in place and functioning, though it has so far been exercised only over a small number of incidents rather than validated for how policy quality evolves over a longer operational history.
+
+Taken together, the objective most concerned with the anomaly-detection model's own accuracy and the mechanical correctness of the orchestration layer (Objectives 1, 4, and 5) were met either in full or with a narrow, clearly identified caveat; the two objectives whose fulfilment depends on the cloud-tier classifier being reliable on real-world, edge-supplied telemetry (Objectives 2 and 3) were met at the level of mechanism but not yet at the level of end-to-end trust, for the reasons documented in Section 4.3 and revisited in Section 5.4 below.
+
+\section{Major Contributions}
+
+This project makes the following contributions:
+
+\begin{enumerate}
+\item \textbf{A fused GRU--Deep SVDD anomaly ensemble with a quantified ablation.} Rather than presenting the hybrid model's accuracy in isolation, this report isolates and quantifies what the temporal component specifically adds over a one-class boundary method operating on point features alone (Section 4.2), giving the design choice an empirical justification beyond the architectural reasoning of Section 3.2.
+
+\item \textbf{A two-stage, decay-based rolling risk score that treats detection as accumulating evidence rather than a single-shot decision.} The mechanism's deliberate asymmetry-risk rises faster than it decays-directly targets the alert-fatigue and transient-spike problems documented in Section 1.1.4, and is a concrete instantiation of the ``single-shot vs. persistent detection'' gap identified in Section 2.7.
+
+\item \textbf{Repurposing SHAP as a machine-consumable interface rather than a human-facing visualisation.} Where the reviewed literature (Section 2.2) treats SHAP outputs as inputs to a human analyst's judgement, this framework serialises the same attributions into short, structured statements consumed directly by the Decision and Escalation Agents, extending explainability's role from usability aid to a precondition for automated action.
+
+\item \textbf{A deterministic-ladder-with-LLM-fallback architecture for remediation.} Rather than delegating every healing decision to a language model, the framework reserves LLM reasoning for the specific cases a fixed, auditable playbook cannot resolve-an unhandled attack bucket or a sustained low-confidence streak-which keeps the majority of remediation decisions inspectable in advance while retaining LLM flexibility where it is actually needed. This directly addresses the diagnostic-versus-restorative gap discussed in Sections 2.3 and 2.7.
+
+\item \textbf{A self-updating RAG knowledge base that writes its own outcomes back into its retrieval corpus.} Successful and unsuccessful healing actions are recorded as past actions alongside the static playbooks of Appendix A, so that future incidents are grounded against a growing operational record rather than fixed policy alone.
+
+\item \textbf{A comprehensive, prioritised healing-action catalogue and playbook set (Appendix A).} The full atomic-action catalogue and its mapping into escalating, attack-specific playbooks for the classifier's grouped buckets provides a concrete, auditable enforcement vocabulary that grounds the LLM agents' outputs in physically valid actions rather than free-composed commands.
+
+\item \textbf{A live, HTTP-driven verification methodology that surfaced defects an offline evaluation would not have.} Rather than reporting only dataset-derived metrics, Chapter~\ref{cha:results} drove the full cloud-tier pipeline end-to-end over its real interfaces, which is precisely what exposed the RAG write-back defect, the granularity mismatch between the edge's connection-log telemetry and the classifier's expected packet-level features, and the two structurally unreachable healing playbooks. This methodological choice is itself a contribution: several of the limitations reported in Section 4.5.3 are exactly the class of integration failure that a purely offline or unit-level evaluation would have missed.
+\end{enumerate}
+
+\section{Limitations}
+
+The following limitations, most of which were surfaced directly by the live verification testing in Chapter~\ref{cha:results} rather than inferred from the architecture alone, qualify the contributions above and define the starting point for the future work in Section 5.5.
+
+\begin{enumerate}
+\item \textbf{Classifier accuracy on real-world, edge-supplied telemetry is the framework's most serious weakness.} Section 4.3 documents attacks classified as benign at 90--98\% confidence, a legitimate HTTPS session classified as a DDoS attack with real containment actions dispatched against it, classification confidence that is non-monotonic with attack volume, and fine-grained labels that are frequently wrong even when the grouped bucket's confidence gate is crossed. The underlying cause is architectural rather than a tuning defect: roughly half of the 30 features the classifier expects depend on packet-level signals the edge layer does not forward, and are populated with fixed placeholder values at inference time. No downstream component-the ladder engine, the RAG grounding, or the LLM fallback agents-can correct a decision made on an incomplete or mismatched feature vector.
+
+
+
+\item \textbf{The framework's cloud-mediated tier is only as available as the link connecting it to the edge.} A sufficiently severe, distributed link-flooding attack could in principle isolate an edge gateway before a healing command reaches it, a risk that is independent of, and would persist even after, the transport-bridging work described in Section 5.5.
+
+
+
+
+
+\end{enumerate}
+
+\section{Future Research Directions}
+
+Building on the layered edge--cloud architecture, GRU--SVDD anomaly detection, SHAP-based explanations, and multi-agent LLM orchestration presented in this work, several medium- to long-term research avenues can be identified for advancing autonomous IoT security. These directions target robustness, privacy, trustworthiness, and operational realism in large-scale deployments of self-healing IoT networks.
+
+\subsection{Federated and Collaborative Self-Healing Across Gateways}
+
+A first direction is to extend the proposed framework into a federated self-healing architecture where multiple IoT gateways collaboratively train anomaly-detection and threat-classification models without sharing raw telemetry. Recent work on federated IDS for IIoT has shown that distributed training can achieve accuracy close to centralized systems while preserving data privacy and improving scalability, suggesting that integrating FedAvg, FedProx, or attention-weighted aggregation into the GRU--SVDD and XGBoost components could make the self-healing pipeline resilient to heterogeneous traffic and non-IID data distributions.
+
+\subsection{Hybrid AI--Blockchain Trust and Audit for Healing Actions}
+
+A second avenue is the exploration of hybrid AI--blockchain architectures in which healing actions, model updates, and operator overrides are recorded on lightweight distributed ledgers to provide tamper-evident audit trails and cross-domain trust. Recent surveys on FL-based IDS and decentralized cybersecurity frameworks highlight blockchain as a promising foundation for secure data provenance and device authentication in autonomous IoT ecosystems, and coupling the orchestrator's decisions with on-chain verification could help balance extensive automation with regulatory and compliance requirements.
+
+\subsection{Reinforcement and Meta-Learning for Adaptive Healing Policies}
+
+Third, the rule-based healing catalogue can be evolved into a reinforcement-learning or meta-learning layer that continuously optimizes remediation policies under changing attack patterns, resource constraints, and business priorities. Studies on self-healing cybersecurity systems recommend leveraging deep reinforcement learning and meta-learning to adapt control strategies over time, suggesting that the framework's risk score and SHAP attributions could be used as state signals and rewards for agents that learn when to isolate, throttle, or reconfigure services while respecting safety and service-level objectives.
+
+\subsection{Constrained Multi-Agent LLM Security Orchestration}
+
+A fourth direction is to formalize the multi-agent LLM core using constrained decision-making and optimization techniques that explicitly separate stochastic plan generation from deterministic enforcement, reducing the risk of unsafe or conflicting actions. Recent multi-agent security systems propose architectures where LLM agents generate candidate mitigation portfolios while an optimization or rule-engine layer enforces closed-world action validity and resource feasibility, and adapting such self-adaptive pattern-selection schemes to IoT self-healing could strengthen runtime guarantees without sacrificing the flexibility of agentic reasoning.
+
+\subsection{Dataset-Centric Evaluation and Real-World Benchmarking}
+
+Fifth, future work should focus on dataset-centric evaluation and real-world benchmarking of the self-healing pipeline across multiple contemporary IoT security datasets and realistic testbeds. Recent studies emphasize that federated and edge-native IDS must be assessed on heterogeneous datasets and deployment scenarios to uncover drift, robustness issues, and performance gaps, indicating that systematic experiments on Edge-IIoTset, CIC-IoT2023, TON-IoT, and emerging mission-critical IoT environments would be essential for validating the generalizability of the proposed GRU--SVDD, XGBoost--SHAP, and multi-agent LLM stack.
+
+\subsection{Safety, Explainability, and Human-in-the-Loop Assurance}
+
+Finally, the integration of safety-aware design, explainable AI, and human-in-the-loop assurance mechanisms should be deepened beyond current SHAP-based explanations and operator escalation. Recent trustworthy IDS frameworks combine global and local explanations with adversarial hardening and continual replay to turn explanations into robustness actions, and extending this idea to the self-healing pipeline---by systematically linking explanatory artifacts to healing options and operator dashboards---could improve analyst trust, regulatory acceptance, and safe deployment in critical IoT infrastructures.
+
+\section{Publications and Research Outcomes}
+
+At the time of writing, no results from this project have been published or submitted to a peer-reviewed venue. The project budget (Table 3.3) reserves funding for a conference paper registration fee, reflecting the group's intention to prepare a submission distilling the cascaded GRU--Deep SVDD ensemble and its evaluation once the integration limitations identified in Section 5.4-most notably the edge-cloud transport bridge and the classifier's feature-granularity mismatch-have been addressed and the framework has been demonstrated end-to-end on the target edge hardware rather than through the test-harness-mediated verification reported in this report. A concrete submission target and timeline will be finalised once this remaining integration work is complete.
