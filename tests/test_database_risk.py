@@ -8,7 +8,13 @@ from iot_guard.risk import update_risk
 def test_database_records_device_and_inference(tmp_path):
     database = Database(tmp_path / "guard.db")
     database.initialize()
-    database.upsert_device("iot-1", "fingerprint", "camera", "10.42.0.2")
+    database.upsert_device(
+        "iot-1",
+        "fingerprint",
+        "camera",
+        "10.42.0.2",
+        mac_address="02:00:00:00:00:01",
+    )
     result = {
         "point_score": 3.0,
         "temporal_score": 4.0,
@@ -26,6 +32,8 @@ def test_database_records_device_and_inference(tmp_path):
     database.cleanup(retention_days=30)
     dashboard = database.dashboard()
     assert dashboard["counts"]["total"] == 1
+    assert dashboard["devices"][0]["ipv4"] == "10.42.0.2"
+    assert dashboard["devices"][0]["mac_address"] == "02:00:00:00:00:01"
     assert dashboard["devices"][0]["risk_score"] > 0
     assert dashboard["recent"][0]["anomaly_type"] == "point"
     assert dashboard["recent"][0]["raw_score"] == 3.5
@@ -56,6 +64,44 @@ def test_daily_reset_clears_current_risk_but_keeps_history(tmp_path):
     assert (score, updated_at, consecutive) == (0.0, None, 0)
     assert len(database.device_detail("iot-1")["events"]) == 1
     assert database.reset_daily_risk(observed_at + timedelta(minutes=20)) == 0
+
+
+def test_initialize_migrates_legacy_device_ids_and_history(tmp_path):
+    database = Database(tmp_path / "guard.db")
+    database.initialize()
+    database.upsert_device(
+        "iot-legacy",
+        "fingerprint",
+        "camera",
+        "10.42.0.2",
+        mac_address="02:00:00:00:00:01",
+    )
+    database.record_window("iot-legacy", datetime.now(UTC).isoformat(), 2, 1, 64)
+
+    database.initialize()
+
+    assert database.device_detail("iot-legacy") is None
+    migrated = database.device_detail("id-020000000001")
+    assert migrated is not None
+    assert len(migrated["windows"]) == 1
+
+
+def test_database_returns_latest_captured_features(tmp_path):
+    database = Database(tmp_path / "guard.db")
+    database.initialize()
+    database.upsert_device("iot-1", "fingerprint", "camera", "10.42.0.2")
+    features = {
+        "network_packets_all_count": 3.0,
+        "network_packet-size_avg": 128.5,
+    }
+    observed_at = datetime.now(UTC).isoformat()
+
+    database.record_window("iot-1", observed_at, 2, 3, 386, features)
+
+    latest = database.device_detail("iot-1")["latest_features"]
+    assert latest["window_start"] == observed_at
+    assert latest["resolution_seconds"] == 2
+    assert latest["values"] == features
 
 
 def test_report_risk_formula_and_repeat_counter():

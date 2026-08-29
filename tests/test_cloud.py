@@ -1,4 +1,3 @@
-import threading
 from unittest.mock import Mock
 
 import pytest
@@ -32,6 +31,8 @@ def collector_for_reporting():
     collector = Collector.__new__(Collector)
     collector.database = FakeDatabase()
     collector.cloud = FakeCloud()
+    collector.next_anomaly_report_at = {}
+    collector.anomaly_report_interval_seconds = 120.0
     collector.model = type(
         "Model",
         (),
@@ -88,13 +89,39 @@ def test_benign_result_is_not_posted():
     assert collector.cloud.payloads == []
 
 
-def test_reporter_delivers_in_background_and_blank_endpoint_disables_it():
+def test_anomaly_reporting_waits_two_minutes_per_device(monkeypatch):
+    collector = collector_for_reporting()
+    now = 0.0
+    monkeypatch.setattr("iot_guard.collector.time.monotonic", lambda: now)
+    result = {
+        "point_score": 2.0,
+        "temporal_score": None,
+        "ensemble_score": 2.0,
+        "is_anomaly": True,
+        "anomaly_type": "point",
+        "decision": "anomaly",
+    }
+
+    collector._store_result("iot-1", "first", result, {})
+    now = 119.0
+    collector._store_result("iot-1", "suppressed", result, {})
+    collector._store_result("iot-2", "independent", result, {})
+    now = 120.0
+    collector._store_result("iot-1", "eligible", result, {})
+
+    assert [payload["device_id"] for payload in collector.cloud.payloads] == [
+        "iot-1",
+        "iot-2",
+        "iot-1",
+    ]
+
+
+def test_reporter_waits_for_delivery_and_blank_endpoint_disables_it():
     received = []
-    delivered = threading.Event()
 
     def sender(payload):
         received.append(payload)
-        delivered.set()
+        return {"accepted": True}
 
     payload = {
         "flag": "anomaly",
@@ -104,7 +131,6 @@ def test_reporter_delivers_in_background_and_blank_endpoint_disables_it():
     }
     reporter = CloudReporter("https://cloud.example/anomalies", "eth0", sender=sender)
     assert reporter.submit(payload)
-    assert delivered.wait(1)
     reporter.close()
     assert received == [payload]
     assert not CloudReporter("", "eth0").submit(payload)
@@ -112,6 +138,7 @@ def test_reporter_delivers_in_background_and_blank_endpoint_disables_it():
 
 def test_cloud_post_uses_configured_uplink_interface():
     response = Mock(status=202)
+    response.read.return_value = b'{"accepted":true}'
     connection = Mock()
     connection.getresponse.return_value = response
     factory = Mock(return_value=connection)
@@ -121,12 +148,13 @@ def test_cloud_post_uses_configured_uplink_interface():
         token="secret",
         connection_factory=factory,
     )
-    reporter._post({"flag": "anomaly", "device_id": "iot-1"})
+    result = reporter._post({"flag": "anomaly", "device_id": "iot-1"})
 
+    assert result == {"accepted": True}
     target, interface, timeout = factory.call_args.args
     assert target.hostname == "cloud.example"
     assert interface == "eth0"
-    assert timeout == 5.0
+    assert timeout == 30.0
     connection.request.assert_called_once()
     method, path = connection.request.call_args.args[:2]
     assert (method, path) == ("POST", "/api/anomalies?site=edge")

@@ -45,6 +45,15 @@ def latency_benchmark() -> dict | None:
         return None
 
 
+def model_feature_columns() -> list[str]:
+    path = settings.artifact_dir / "metadata.json"
+    try:
+        columns = json.loads(path.read_text())["feature_columns"]
+    except (FileNotFoundError, KeyError, json.JSONDecodeError, OSError):
+        return []
+    return [column for column in columns if isinstance(column, str)]
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     database.initialize()
@@ -67,6 +76,10 @@ def device_detail(request: Request, device_id: str):
     data = database.device_detail(device_id)
     if data is None:
         raise HTTPException(status_code=404, detail="Device not found")
+    values = data["latest_features"]["values"] if data["latest_features"] else {}
+    data["feature_rows"] = [
+        {"name": name, "value": values.get(name)} for name in model_feature_columns()
+    ]
     return templates.TemplateResponse(request, "device.html", data)
 
 

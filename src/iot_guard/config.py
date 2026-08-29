@@ -26,6 +26,7 @@ class Settings:
     cloud_uplink_interface: str
     cloud_api_token: str
     cloud_api_timeout_seconds: float
+    cloud_anomaly_interval_seconds: float
     retention_days: int
     model_cpu_threads: int
     model_buffer_timeout_seconds: float
@@ -58,7 +59,10 @@ class Settings:
             cloud_uplink_interface=os.getenv("IOT_GUARD_CLOUD_UPLINK_INTERFACE", "eth0"),
             cloud_api_token=os.getenv("IOT_GUARD_CLOUD_API_TOKEN", ""),
             cloud_api_timeout_seconds=float(
-                os.getenv("IOT_GUARD_CLOUD_API_TIMEOUT_SECONDS", "5")
+                os.getenv("IOT_GUARD_CLOUD_API_TIMEOUT_SECONDS", "30")
+            ),
+            cloud_anomaly_interval_seconds=float(
+                os.getenv("IOT_GUARD_CLOUD_ANOMALY_INTERVAL_SECONDS", "120")
             ),
             retention_days=int(os.getenv("IOT_GUARD_RETENTION_DAYS", "30")),
             model_cpu_threads=int(os.getenv("IOT_GUARD_MODEL_CPU_THREADS", "2")),

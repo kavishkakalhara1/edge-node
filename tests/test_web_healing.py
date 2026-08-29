@@ -13,6 +13,62 @@ def client_for(tmp_path, monkeypatch):
     return TestClient(web.app), database
 
 
+def test_dashboard_shows_connected_device_addresses(tmp_path, monkeypatch):
+    client, database = client_for(tmp_path, monkeypatch)
+    with client:
+        database.upsert_device(
+            "iot-1",
+            "fingerprint",
+            "camera",
+            "10.42.0.2",
+            mac_address="02:00:00:00:00:01",
+        )
+
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert "10.42.0.2" in response.text
+    assert "02:00:00:00:00:01" in response.text
+    assert "online" in response.text
+
+
+def test_device_detail_returns_monitored_traffic(tmp_path, monkeypatch):
+    client, database = client_for(tmp_path, monkeypatch)
+    with client:
+        database.upsert_device("iot-1", "fingerprint", "camera", "10.42.0.2")
+        database.record_window(
+            "iot-1",
+            "2026-08-29T20:00:00+00:00",
+            2,
+            12,
+            4096,
+            {
+                "network_packets_all_count": 12.0,
+                "network_ttl_avg": 63.5,
+            },
+        )
+
+        response = client.get("/api/devices/iot-1")
+        page = client.get("/devices/iot-1")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["traffic"]["window_count"] == 1
+    assert data["traffic"]["packet_count"] == 12
+    assert data["traffic"]["byte_count"] == 4096
+    assert data["windows"][0]["packets_per_second"] == 6
+    assert data["windows"][0]["bytes_per_second"] == 2048
+    assert page.status_code == 200
+    assert "Monitored traffic" in page.text
+    assert "4,096" in page.text
+    assert "6.00 pkt/s" in page.text
+    assert "Live model features" in page.text
+    assert "network_packets_all_count" in page.text
+    assert ">12<" in page.text
+    assert "network_ttl_avg" in page.text
+    assert ">63.5<" in page.text
+
+
 def test_post_healing_action_queues_request(tmp_path, monkeypatch):
     client, database = client_for(tmp_path, monkeypatch)
     with client:

@@ -17,7 +17,12 @@ class PacketParser:
         from scapy.layers.inet import IP, TCP, UDP
         from scapy.layers.l2 import Ether
 
-        if not packet.haslayer(Ether) or not packet.haslayer(IP):
+        if not packet.haslayer(Ether):
+            try:
+                packet = Ether(bytes(packet))
+            except (TypeError, ValueError):
+                return None
+        if not packet.haslayer(IP):
             return None
         ethernet = packet[Ether]
         ip = packet[IP]
@@ -102,6 +107,7 @@ class CaptureService:
         for interface in self.interfaces:
             sniffer = AsyncSniffer(
                 iface=interface,
+                promisc=False,
                 store=False,
                 prn=lambda packet, source=interface: self._handle(source, packet),
             )

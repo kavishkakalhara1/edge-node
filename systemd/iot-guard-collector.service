@@ -1,7 +1,7 @@
 [Unit]
 Description=IoT Guard passive capture and ML inference
-After=network-online.target iot-guard-monitor.service
-Wants=network-online.target iot-guard-monitor.service
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple

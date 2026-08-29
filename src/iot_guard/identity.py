@@ -26,8 +26,7 @@ class DeviceIdentity:
         return cls(path.read_bytes())
 
     def device_id(self, mac: str) -> str:
-        digest = hmac.new(self._secret, normalize_mac(mac).encode(), hashlib.sha256).hexdigest()
-        return f"iot-{digest[:20]}"
+        return f"id-{normalize_mac(mac).replace(':', '')}"
 
     def mac_fingerprint(self, mac: str) -> str:
         digest = hmac.new(self._secret, b"audit:" + normalize_mac(mac).encode(), hashlib.sha256)

@@ -15,9 +15,53 @@
   <main>
     <section class="facts">
       <div><span>IPv4</span><strong>{{ device.ipv4 or 'Unknown' }}</strong></div>
+      <div><span>MAC address</span><strong>{{ device.mac_address or 'Unknown' }}</strong></div>
       <div><span>Connection</span><strong>{{ 'Online' if device.connected else 'Offline' }}</strong></div>
       <div><span>First seen</span><strong>{{ device.first_seen[:19]|replace('T', ' ') }}</strong></div>
       <div><span>Last seen</span><strong>{{ device.last_seen[:19]|replace('T', ' ') }}</strong></div>
+    </section>
+    <section class="traffic-panel">
+      <div class="section-heading"><h2>Monitored traffic</h2><span>Last 24 hours</span></div>
+      <div class="traffic-metrics">
+        <div><span>Traffic windows</span><strong>{{ '{:,}'.format(traffic.window_count) }}</strong></div>
+        <div><span>Packets observed</span><strong>{{ '{:,}'.format(traffic.packet_count) }}</strong></div>
+        <div><span>Bytes observed</span><strong>{{ '{:,}'.format(traffic.byte_count) }}</strong></div>
+        <div><span>Latest window</span><strong>{{ traffic.latest_window[:19]|replace('T', ' ') if traffic.latest_window else 'No traffic' }}</strong></div>
+      </div>
+      <div class="section-heading feature-heading">
+        <h2>Live model features</h2>
+        {% if latest_features %}
+          <span>{{ feature_rows|length }} inputs / {{ latest_features.resolution_seconds }}s window / {{ latest_features.window_start[:19]|replace('T', ' ') }}</span>
+        {% else %}
+          <span>Waiting for captured traffic</span>
+        {% endif %}
+      </div>
+      <div class="feature-grid">
+        {% for feature in feature_rows %}
+          <div class="feature-value">
+            <span>{{ feature.name }}</span>
+            <strong>{{ '%.6g'|format(feature.value) if feature.value is not none else 'Unavailable' }}</strong>
+          </div>
+        {% else %}
+          <p class="empty feature-empty">Model metadata is unavailable.</p>
+        {% endfor %}
+      </div>
+      <div class="section-heading traffic-heading"><h2>Recent windows</h2><span>Most recent 100 samples</span></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Time</th><th>Interval</th><th>Packets</th><th>Bytes</th><th>Packet rate</th><th>Throughput</th></tr></thead>
+        <tbody>
+        {% for window in windows %}
+          <tr>
+            <td>{{ window.window_start[:19]|replace('T', ' ') }}</td>
+            <td>{{ window.resolution_seconds }}s</td>
+            <td>{{ '{:,}'.format(window.packet_count) }}</td>
+            <td>{{ '{:,}'.format(window.byte_count) }}</td>
+            <td>{{ '%.2f'|format(window.packets_per_second) }} pkt/s</td>
+            <td>{{ '%.2f'|format(window.bytes_per_second) }} B/s</td>
+          </tr>
+        {% else %}<tr><td colspan="6" class="empty">No monitored traffic yet.</td></tr>{% endfor %}
+        </tbody>
+      </table></div>
     </section>
     <section class="event-log">
       <div class="section-heading"><h2>Detection history</h2><span>Most recent 200 decisions</span></div>

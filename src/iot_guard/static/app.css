@@ -61,6 +61,7 @@ main { padding: 28px clamp(20px, 5vw, 72px) 60px; }
   border: 1px solid var(--line);
   background: var(--surface);
 }
+.facts { grid-template-columns: repeat(5, 1fr); }
 .metrics div, .facts div { padding: 20px 24px; border-right: 1px solid var(--line); }
 .metrics div:last-child, .facts div:last-child { border: 0; }
 .metrics strong { display: block; font-size: 30px; }
@@ -91,7 +92,7 @@ main { padding: 28px clamp(20px, 5vw, 72px) 60px; }
 .latency-values p { margin-top: 3px; color: var(--muted); font-size: 11px; }
 
 .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; }
-.device-list, .alerts, .event-log {
+.device-list, .alerts, .event-log, .traffic-panel {
   min-width: 0;
   border: 1px solid var(--line);
   background: var(--surface);
@@ -158,13 +159,43 @@ td:last-child { display: flex; align-items: center; gap: 8px; }
   text-transform: uppercase;
 }
 .facts strong { font-size: 14px; }
+.traffic-panel { margin-bottom: 24px; }
+.traffic-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.traffic-metrics > div { min-width: 0; padding: 18px 20px; border-right: 1px solid var(--line); }
+.traffic-metrics > div:last-child { border-right: 0; }
+.traffic-metrics span { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; }
+.traffic-metrics strong { display: block; margin-top: 5px; overflow-wrap: anywhere; font-size: 20px; }
+.traffic-metrics > div:last-child strong { font-size: 14px; }
+.feature-heading, .traffic-heading { border-top: 1px solid var(--line); }
+.feature-heading span { text-align: right; }
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  background: var(--line);
+  gap: 1px;
+}
+.feature-value { min-width: 0; padding: 13px 16px; background: var(--surface); }
+.feature-value span {
+  display: block;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.feature-value strong { display: block; margin-top: 4px; font-size: 18px; font-variant-numeric: tabular-nums; }
+.feature-empty { grid-column: 1 / -1; background: var(--surface); }
+.traffic-panel td:last-child { display: table-cell; }
 .anomaly-row { background: #fff7ed; }
 .event-log td:last-child { display: table-cell; }
 
 @media (max-width: 900px) {
   .workspace { grid-template-columns: minmax(0, 1fr); }
-  .metrics, .facts, .latency-values { grid-template-columns: repeat(2, 1fr); }
+  .metrics, .facts, .latency-values, .traffic-metrics { grid-template-columns: repeat(2, 1fr); }
   .metrics div:nth-child(2), .facts div:nth-child(2), .latency-values > div:nth-child(2) { border-right: 0; }
+  .traffic-metrics > div:nth-child(2) { border-right: 0; }
+  .traffic-metrics > div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
   .latency-values > div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
   .alerts { order: -1; }
 }
@@ -172,11 +203,15 @@ td:last-child { display: flex; align-items: center; gap: 8px; }
 @media (max-width: 560px) {
   .topbar { min-height: 120px; align-items: start; flex-direction: column; }
   .live { padding: 0; }
-  .metrics, .facts, .latency-values { grid-template-columns: minmax(0, 1fr); }
-  .metrics div, .facts div, .latency-values > div { border-right: 0; }
+  .metrics, .facts, .latency-values, .traffic-metrics { grid-template-columns: minmax(0, 1fr); }
+  .metrics div, .facts div, .latency-values > div, .traffic-metrics > div { border-right: 0; }
+  .traffic-metrics > div { border-bottom: 1px solid var(--line); }
+  .traffic-metrics > div:last-child { border-bottom: 0; }
   .latency-values > div { border-bottom: 1px solid var(--line); }
   .latency-values > div:last-child { border-bottom: 0; }
   .latency-heading { align-items: start; flex-direction: column; gap: 5px; }
+  .feature-heading { height: auto; min-height: 62px; align-items: start; flex-direction: column; gap: 5px; padding-block: 12px; }
+  .feature-heading span { text-align: left; }
   .workspace { gap: 16px; }
   main { padding-top: 16px; }
 }

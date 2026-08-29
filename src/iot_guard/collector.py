@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import threading
 import time
@@ -16,7 +17,7 @@ from .database import Database
 from .features import FeatureEngine, PacketObservation, WindowRecord
 from .healing import HealingWorker, NftablesHealingExecutor
 from .identity import DeviceIdentity
-from .leases import LeaseRegistry
+from .leases import LeaseRegistry, associated_macs
 from .model import ProductionEnsemble
 from .risk import update_risk
 
@@ -94,6 +95,8 @@ class Collector:
             token=settings.cloud_api_token,
             timeout_seconds=settings.cloud_api_timeout_seconds,
         )
+        self.next_anomaly_report_at: dict[str, float] = {}
+        self.anomaly_report_interval_seconds = settings.cloud_anomaly_interval_seconds
         self.stop_event = threading.Event()
         self.last_cleanup = 0.0
         self.risk_date = datetime.now(timezone.utc).date()
@@ -101,6 +104,16 @@ class Collector:
     def start(self) -> None:
         self.database.initialize()
         self.database.reset_daily_risk()
+        if not self.settings.dhcp_lease_file.is_file():
+            LOGGER.error(
+                "DHCP lease file does not exist: %s; connected devices cannot be discovered",
+                self.settings.dhcp_lease_file,
+            )
+        elif not os.access(self.settings.dhcp_lease_file, os.R_OK):
+            LOGGER.error(
+                "DHCP lease file is not readable: %s; connected devices cannot be discovered",
+                self.settings.dhcp_lease_file,
+            )
         self.refresh_devices()
         self.capture.start()
         LOGGER.info("Collector started with model artifact %s", self.model.metadata["artifact_version"])
@@ -130,14 +143,40 @@ class Collector:
 
     def refresh_devices(self) -> None:
         leases = self.leases.refresh()
+        lease_by_mac = {lease.mac: lease for lease in leases}
+        stations = associated_macs(self.settings.hotspot_interface)
+        if stations is None:
+            LOGGER.warning(
+                "Unable to read associated stations from %s; preserving device state",
+                self.settings.hotspot_interface,
+            )
+            return
+        active_macs = stations
         now = time.time()
         active_ids = set()
         for lease in leases:
-            active_ids.add(lease.device_id)
+            if lease.mac not in active_macs:
+                continue
             self.database.upsert_device(
-                lease.device_id, lease.mac_fingerprint, lease.hostname, lease.ipv4
+                lease.device_id,
+                lease.mac_fingerprint,
+                lease.hostname,
+                lease.ipv4,
+                mac_address=lease.mac,
             )
+            active_ids.add(lease.device_id)
             self.features.register_device(lease.device_id, lease.mac, now)
+        for mac in active_macs - set(lease_by_mac):
+            device_id = self.identity.device_id(mac)
+            active_ids.add(device_id)
+            self.database.upsert_device(
+                device_id,
+                self.identity.mac_fingerprint(mac),
+                None,
+                None,
+                mac_address=mac,
+            )
+            self.features.register_device(device_id, mac, now)
         disconnected = set(self.features.devices) - active_ids
         self.features.unregister_missing(active_ids)
         for device_id in disconnected:
@@ -182,14 +221,20 @@ class Collector:
         )
         self.database.record_inference(device_id, observed_at, enriched, risk)
         if enriched.get("is_anomaly"):
-            self.cloud.submit(
-                {
-                    "flag": "anomaly",
-                    "risk_score": risk.current,
-                    "network_features": dict(network_features),
-                    "device_id": device_id,
-                }
-            )
+            now = time.monotonic()
+            if now >= self.next_anomaly_report_at.get(device_id, 0.0):
+                delivered = self.cloud.submit(
+                    {
+                        "flag": "anomaly",
+                        "risk_score": risk.current,
+                        "network_features": dict(network_features),
+                        "device_id": device_id,
+                    }
+                )
+                if delivered:
+                    self.next_anomaly_report_at[device_id] = (
+                        time.monotonic() + self.anomaly_report_interval_seconds
+                    )
             LOGGER.warning(
                 "Anomaly device=%s type=%s risk=%.1f",
                 device_id,
@@ -205,6 +250,7 @@ class Collector:
             window.resolution_seconds,
             window.packet_count,
             window.byte_count,
+            window.features,
         )
         records = self.windows.add(
             window.device_id,

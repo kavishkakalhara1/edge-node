@@ -9,6 +9,8 @@ Type=oneshot
 EnvironmentFile=-/etc/iot-guard/iot-guard.env
 ExecStart=/opt/iot-guard/setup_monitor.sh
 RemainAfterExit=yes
+Restart=on-failure
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
