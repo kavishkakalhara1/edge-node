@@ -102,7 +102,9 @@ def check(settings: Settings) -> None:
         "database": str(settings.database_path),
         "database_writable": os.access(settings.database_path.parent, os.W_OK),
         "identity_secret_present": settings.identity_secret_file.is_file(),
+        "dhcp_lease_file": str(settings.dhcp_lease_file),
         "dhcp_lease_file_present": settings.dhcp_lease_file.is_file(),
+        "dhcp_lease_file_readable": os.access(settings.dhcp_lease_file, os.R_OK),
         "network_roles": {
             "iot_hotspot": settings.hotspot_interface,
             "cloud_uplink": settings.cloud_uplink_interface,

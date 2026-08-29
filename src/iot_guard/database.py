@@ -7,10 +7,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 
+from .identity import normalize_mac
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS devices (
     device_id TEXT PRIMARY KEY,
     mac_fingerprint TEXT NOT NULL UNIQUE,
+    mac_address TEXT,
     hostname TEXT,
     ipv4 TEXT,
     first_seen TEXT NOT NULL,
@@ -48,7 +51,8 @@ CREATE TABLE IF NOT EXISTS traffic_windows (
     window_start TEXT NOT NULL,
     resolution_seconds INTEGER NOT NULL,
     packet_count INTEGER NOT NULL,
-    byte_count INTEGER NOT NULL
+    byte_count INTEGER NOT NULL,
+    features_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_windows_device_time
 ON traffic_windows(device_id, window_start DESC);
@@ -121,23 +125,77 @@ class Database:
                 connection.execute(
                     "ALTER TABLE devices ADD COLUMN consecutive_anomalies INTEGER NOT NULL DEFAULT 0"
                 )
+            if "mac_address" not in device_columns:
+                connection.execute("ALTER TABLE devices ADD COLUMN mac_address TEXT")
+            window_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(traffic_windows)")
+            }
+            if "features_json" not in window_columns:
+                connection.execute(
+                    "ALTER TABLE traffic_windows ADD COLUMN features_json TEXT NOT NULL DEFAULT '{}'"
+                )
+            connection.commit()
+            self._migrate_device_ids(connection)
+
+    @staticmethod
+    def _migrate_device_ids(connection: sqlite3.Connection) -> None:
+        migrations = []
+        for row in connection.execute(
+            "SELECT device_id, mac_address FROM devices WHERE mac_address IS NOT NULL"
+        ):
+            new_id = f"id-{normalize_mac(row['mac_address']).replace(':', '')}"
+            if row["device_id"] != new_id:
+                migrations.append((row["device_id"], new_id))
+        if not migrations:
+            return
+
+        connection.execute("PRAGMA foreign_keys = OFF")
+        try:
+            connection.execute("BEGIN")
+            for old_id, new_id in migrations:
+                existing = connection.execute(
+                    "SELECT device_id FROM devices WHERE device_id = ?", (new_id,)
+                ).fetchone()
+                if existing is not None:
+                    raise RuntimeError(f"Cannot migrate {old_id}: {new_id} already exists")
+                for table in ("anomaly_events", "traffic_windows", "healing_action_requests"):
+                    connection.execute(
+                        f"UPDATE {table} SET device_id = ? WHERE device_id = ?",
+                        (new_id, old_id),
+                    )
+                connection.execute(
+                    "UPDATE devices SET device_id = ? WHERE device_id = ?", (new_id, old_id)
+                )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.execute("PRAGMA foreign_keys = ON")
 
     def upsert_device(
-        self, device_id: str, mac_fingerprint: str, hostname: str | None, ipv4: str | None
+        self,
+        device_id: str,
+        mac_fingerprint: str,
+        hostname: str | None,
+        ipv4: str | None,
+        mac_address: str | None = None,
     ) -> None:
         now = utc_now()
         with self.connect() as connection:
             connection.execute(
                 """
-                INSERT INTO devices(device_id, mac_fingerprint, hostname, ipv4, first_seen, last_seen)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO devices(
+                    device_id, mac_fingerprint, mac_address, hostname, ipv4, first_seen, last_seen
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(device_id) DO UPDATE SET
+                    mac_address = COALESCE(excluded.mac_address, devices.mac_address),
                     hostname = COALESCE(excluded.hostname, devices.hostname),
                     ipv4 = COALESCE(excluded.ipv4, devices.ipv4),
                     last_seen = excluded.last_seen,
                     connected = 1
                 """,
-                (device_id, mac_fingerprint, hostname, ipv4, now, now),
+                (device_id, mac_fingerprint, mac_address, hostname, ipv4, now, now),
             )
 
     def mark_disconnected_except(self, active_ids: set[str]) -> None:
@@ -209,14 +267,28 @@ class Database:
             )
 
     def record_window(
-        self, device_id: str, window_start: str, resolution: int, packets: int, byte_count: int
+        self,
+        device_id: str,
+        window_start: str,
+        resolution: int,
+        packets: int,
+        byte_count: int,
+        features: dict[str, float] | None = None,
     ) -> None:
         with self.connect() as connection:
             connection.execute(
                 """INSERT INTO traffic_windows(
-                    device_id, window_start, resolution_seconds, packet_count, byte_count
-                ) VALUES (?, ?, ?, ?, ?)""",
-                (device_id, window_start, resolution, packets, byte_count),
+                    device_id, window_start, resolution_seconds, packet_count, byte_count,
+                    features_json
+                ) VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    device_id,
+                    window_start,
+                    resolution,
+                    packets,
+                    byte_count,
+                    json.dumps(features or {}, separators=(",", ":")),
+                ),
             )
 
     def log(self, level: str, component: str, message: str, details: dict | None = None) -> None:
@@ -324,6 +396,7 @@ class Database:
         return {"devices": devices, "counts": counts, "recent": recent}
 
     def device_detail(self, device_id: str) -> dict | None:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
         with self.connect() as connection:
             row = connection.execute(
                 "SELECT * FROM devices WHERE device_id = ?", (device_id,)
@@ -335,10 +408,43 @@ class Database:
                 (device_id,),
             )]
             windows = [dict(item) for item in connection.execute(
-                "SELECT * FROM traffic_windows WHERE device_id = ? ORDER BY window_start DESC LIMIT 100",
+                """SELECT id, device_id, window_start, resolution_seconds,
+                    packet_count, byte_count FROM traffic_windows
+                WHERE device_id = ? ORDER BY window_start DESC LIMIT 100""",
                 (device_id,),
             )]
-        return {"device": dict(row), "events": events, "windows": windows}
+            latest_features_row = connection.execute(
+                """SELECT window_start, resolution_seconds, features_json
+                FROM traffic_windows WHERE device_id = ? AND features_json <> '{}'
+                ORDER BY window_start DESC, resolution_seconds ASC LIMIT 1""",
+                (device_id,),
+            ).fetchone()
+            traffic = dict(connection.execute(
+                """SELECT COUNT(*) AS window_count,
+                    COALESCE(SUM(packet_count), 0) AS packet_count,
+                    COALESCE(SUM(byte_count), 0) AS byte_count,
+                    MAX(window_start) AS latest_window
+                FROM traffic_windows WHERE device_id = ? AND window_start >= ?""",
+                (device_id, cutoff),
+            ).fetchone())
+        for window in windows:
+            resolution = max(int(window["resolution_seconds"]), 1)
+            window["packets_per_second"] = window["packet_count"] / resolution
+            window["bytes_per_second"] = window["byte_count"] / resolution
+        latest_features = None
+        if latest_features_row is not None:
+            latest_features = {
+                "window_start": latest_features_row["window_start"],
+                "resolution_seconds": latest_features_row["resolution_seconds"],
+                "values": json.loads(latest_features_row["features_json"]),
+            }
+        return {
+            "device": dict(row),
+            "events": events,
+            "windows": windows,
+            "traffic": traffic,
+            "latest_features": latest_features,
+        }
 
     def reset_daily_risk(self, now: datetime | None = None) -> int:
         current_date = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).date().isoformat()

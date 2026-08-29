@@ -1,9 +1,38 @@
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from .identity import DeviceIdentity, normalize_mac
+
+
+def parse_station_macs(output: str) -> set[str]:
+    macs = set()
+    for line in output.splitlines():
+        parts = line.strip().split()
+        if len(parts) >= 2 and parts[0] == "Station":
+            try:
+                macs.add(normalize_mac(parts[1]))
+            except ValueError:
+                continue
+    return macs
+
+
+def associated_macs(interface: str) -> set[str] | None:
+    try:
+        result = subprocess.run(
+            ["iw", "dev", interface, "station", "dump"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    return parse_station_macs(result.stdout)
 
 
 @dataclass(frozen=True)

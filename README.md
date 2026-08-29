@@ -6,7 +6,7 @@ Passive, per-device anomaly monitoring for a Raspberry Pi 5 hotspot. The built-i
 
 - Creates a WPA2 hotspot for IoT devices with NetworkManager.
 - Discovers clients from DHCP leases; unrelated nearby MAC addresses are ignored.
-- Converts each client MAC into a stable HMAC-derived ID. Raw MAC addresses are not stored.
+- Converts each client MAC into a stable `id-<mac-without-colons>` identifier.
 - Captures decrypted hotspot traffic passively on `wlan0`; `wlan1mon` is supplemental.
 - Produces aligned 2-second point windows and 10-second temporal windows.
 - Scores each interval after four consecutive aggregated records are available.
@@ -21,7 +21,7 @@ IoT clients
     |
 wlan0 WPA2 hotspot ---- NetworkManager DHCP leases
     |                              |
-    |                              +-- HMAC device identity
+    |                              +-- MAC-derived device identity
     |
 passive capture <---- wlan1mon supplemental USB monitor
     |
@@ -97,7 +97,7 @@ sudo /opt/iot-guard/venv/bin/iot-guard benchmark-latency --iterations 300
 
 ## Healing API
 
-Healing requests use the catalogue action ID and the pseudonymous device ID. The web service records each request without network-administration privileges; the collector claims it from SQLite and applies the action with its bounded `CAP_NET_ADMIN` capability. A successful POST returns `202` and a request ID, not a claim that enforcement has already succeeded.
+Healing requests use the catalogue action ID and the device ID. The web service records each request without network-administration privileges; the collector claims it from SQLite and applies the action with its bounded `CAP_NET_ADMIN` capability. A successful POST returns `202` and a request ID, not a claim that enforcement has already succeeded.
 
 The installer generates `IOT_GUARD_HEALING_API_TOKEN` in `/etc/iot-guard/iot-guard.env`. Send it in the `X-IoT-Guard-Token` header. The currently implemented actions are:
 
@@ -124,10 +124,10 @@ The collector needs `CAP_NET_RAW` and `CAP_NET_ADMIN`; the web service runs with
 A DHCP lease registers a connected client. Its MAC is normalized in memory and transformed with:
 
 ```text
-device_id = "iot-" + HMAC-SHA256(secret, mac)[0:20]
+device_id = "id-" + normalized_mac_without_colons
 ```
 
-The database stores `device_id` and a separate HMAC audit fingerprint, not the raw MAC. For every active device, the feature engine emits aggregated numeric records:
+The database stores `device_id`, a separate HMAC audit fingerprint, and the normalized MAC for display on the local dashboard. MAC addresses are not included in model features or cloud anomaly reports. For every active device, the feature engine emits aggregated numeric records:
 
 - One record every 2 seconds.
 - One record every 10 seconds.
@@ -156,16 +156,17 @@ The collector clears current risk to `0` and resets consecutive-anomaly counters
 
 ## Cloud anomaly reporting
 
-Set `IOT_GUARD_CLOUD_API_ENDPOINT` to POST anomalous inference windows to a cloud API. Leave it blank to keep reporting disabled. `IOT_GUARD_CLOUD_API_TOKEN` is optional and, when set, is sent as a bearer token. `IOT_GUARD_CLOUD_API_TIMEOUT_SECONDS` defaults to 5 seconds.
+Set `IOT_GUARD_CLOUD_API_ENDPOINT` to POST detected anomalies to a cloud API. Leave the endpoint blank to disable reporting. `IOT_GUARD_CLOUD_API_TOKEN` is optional and, when set, is sent as a bearer token. `IOT_GUARD_CLOUD_API_TIMEOUT_SECONDS` defaults to 30 seconds.
 
 ```text
-IOT_GUARD_CLOUD_API_ENDPOINT=https://cloud.example/api/anomalies
+IOT_GUARD_CLOUD_API_ENDPOINT=https://iot-api.comesuor.lk/api/edge/raw-ingest
 IOT_GUARD_CLOUD_UPLINK_INTERFACE=eth0
 IOT_GUARD_CLOUD_API_TOKEN=replace-with-cloud-token
-IOT_GUARD_CLOUD_API_TIMEOUT_SECONDS=5
+IOT_GUARD_CLOUD_API_TIMEOUT_SECONDS=30
+IOT_GUARD_CLOUD_ANOMALY_INTERVAL_SECONDS=120
 ```
 
-Each anomalous window is queued after its local SQLite record is committed and sent as JSON:
+The first anomaly for each device is stored locally, then synchronously sent as JSON:
 
 ```json
 {
@@ -175,11 +176,11 @@ Each anomalous window is queued after its local SQLite record is committed and s
         "network_packets_all_count": 12.0,
         "network_ttl_avg": 63.5
     },
-    "device_id": "iot-example"
+    "device_id": "id-aabbccddeeff"
 }
 ```
 
-`network_features` contains the complete unscaled feature map computed for the triggering window, not only the two example fields above. Delivery runs on a bounded background queue so cloud latency does not block capture or inference. Failed requests are logged; the local anomaly and risk update remain stored.
+`network_features` contains the complete unscaled feature map computed for the window, not only the two example fields above. The collector waits up to the configured timeout for the response and logs the returned body, including any healing `actions`. After a successful response, that device waits 120 seconds before it can send another anomaly; each device has an independent interval. Failed requests are logged and remain eligible for retry on the next anomalous window. Benign windows and all inference/risk updates remain stored locally but are not sent.
 
 Cloud sockets are bound to `IOT_GUARD_CLOUD_UPLINK_INTERFACE` with Linux `SO_BINDTODEVICE`. The collector rejects configurations where this interface equals `IOT_GUARD_HOTSPOT_INTERFACE`, and hotspot setup marks the IoT connection as never-default. With the defaults, IoT clients use `wlan0` while cloud API traffic uses `eth0`, keeping the two interface bandwidths separate.
 

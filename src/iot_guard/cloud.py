@@ -3,9 +3,7 @@ from __future__ import annotations
 import http.client
 import json
 import logging
-import queue
 import socket
-import threading
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import SplitResult, urlsplit
@@ -56,9 +54,8 @@ class CloudReporter:
         endpoint: str,
         uplink_interface: str,
         token: str = "",
-        timeout_seconds: float = 5.0,
-        queue_size: int = 100,
-        sender: Callable[[dict[str, Any]], None] | None = None,
+        timeout_seconds: float = 30.0,
+        sender: Callable[[dict[str, Any]], Any] | None = None,
         connection_factory: Callable[
             [SplitResult, str, float], http.client.HTTPConnection
         ] = _bound_connection,
@@ -68,9 +65,7 @@ class CloudReporter:
         self.token = token
         self.timeout_seconds = timeout_seconds
         self._connection_factory = connection_factory
-        self._queue: queue.Queue[dict[str, Any] | None] = queue.Queue(maxsize=queue_size)
         self._sender = sender or self._post
-        self._thread: threading.Thread | None = None
         if self.endpoint:
             if not self.uplink_interface:
                 raise ValueError("Cloud uplink interface is required when cloud reporting is enabled")
@@ -80,12 +75,6 @@ class CloudReporter:
                 raise ValueError(
                     f"Cloud uplink interface does not exist: {self.uplink_interface}"
                 ) from exc
-            self._thread = threading.Thread(
-                target=self._run,
-                name="iot-guard-cloud-reporter",
-                daemon=True,
-            )
-            self._thread.start()
 
     @property
     def enabled(self) -> bool:
@@ -95,39 +84,27 @@ class CloudReporter:
         if not self.enabled:
             return False
         try:
-            self._queue.put_nowait(payload)
-        except queue.Full:
-            LOGGER.error("Cloud anomaly queue is full; dropping device=%s", payload["device_id"])
+            response = self._sender(payload)
+        except (OSError, http.client.HTTPException, ValueError) as exc:
+            LOGGER.error(
+                "Cloud delivery failed device=%s flag=%s error=%s",
+                payload["device_id"],
+                payload["flag"],
+                exc,
+            )
             return False
+        LOGGER.info(
+            "Cloud delivery succeeded device=%s flag=%s response=%s",
+            payload["device_id"],
+            payload["flag"],
+            response,
+        )
         return True
 
     def close(self) -> None:
-        if self._thread is None:
-            return
-        try:
-            self._queue.put_nowait(None)
-        except queue.Full:
-            LOGGER.warning("Cloud anomaly queue did not drain before shutdown")
-            return
-        self._thread.join(timeout=self.timeout_seconds + 1)
+        pass
 
-    def _run(self) -> None:
-        while True:
-            payload = self._queue.get()
-            try:
-                if payload is None:
-                    return
-                self._sender(payload)
-            except (OSError, http.client.HTTPException, ValueError) as exc:
-                LOGGER.error(
-                    "Cloud anomaly delivery failed device=%s error=%s",
-                    payload["device_id"],
-                    exc,
-                )
-            finally:
-                self._queue.task_done()
-
-    def _post(self, payload: dict[str, Any]) -> None:
+    def _post(self, payload: dict[str, Any]) -> dict[str, Any] | str | None:
         target = urlsplit(self.endpoint)
         if target.scheme not in {"http", "https"} or not target.hostname:
             raise ValueError("Cloud API endpoint must be an absolute HTTP(S) URL")
@@ -150,8 +127,16 @@ class CloudReporter:
                 headers=headers,
             )
             response = connection.getresponse()
+            response_body = response.read()
             if not 200 <= response.status < 300:
-                raise OSError(f"Cloud API returned HTTP {response.status}")
-            response.read()
+                detail = response_body.decode("utf-8", errors="replace")
+                raise OSError(f"Cloud API returned HTTP {response.status}: {detail}")
+            if not response_body:
+                return None
+            text = response_body.decode("utf-8", errors="replace")
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return text
         finally:
             connection.close()

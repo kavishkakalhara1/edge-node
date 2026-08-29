@@ -1,13 +1,12 @@
 from iot_guard.identity import DeviceIdentity, normalize_mac
-from iot_guard.leases import LeaseRegistry
+from iot_guard.leases import LeaseRegistry, parse_station_macs
 
 
-def test_device_ids_are_stable_and_do_not_expose_mac():
+def test_device_ids_use_normalized_mac_without_colons():
     identity = DeviceIdentity(b"x" * 32)
     first = identity.device_id("AA-BB-CC-DD-EE-FF")
     assert first == identity.device_id("aa:bb:cc:dd:ee:ff")
-    assert "aa" not in first
-    assert first.startswith("iot-")
+    assert first == "id-aabbccddeeff"
 
 
 def test_normalize_mac_rejects_invalid_values():
@@ -41,3 +40,15 @@ def test_unreadable_lease_file_is_treated_as_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(type(lease_file), "read_text", deny_read)
     assert registry.refresh() == []
     assert registry.by_mac == {}
+
+
+def test_station_dump_parser_returns_normalized_macs():
+    output = """Station 02:00:00:00:00:01 (on wlan1)
+	inactive time:\t10 ms
+Station invalid (on wlan1)
+Station 02:00:00:00:00:02 (on wlan1)
+"""
+    assert parse_station_macs(output) == {
+        "02:00:00:00:00:01",
+        "02:00:00:00:00:02",
+    }

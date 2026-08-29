@@ -42,17 +42,17 @@
     <section class="workspace">
       <div class="device-list">
         <div class="section-heading">
-          <h2>Devices</h2>
-          <span>Highest risk first</span>
+          <h2>Known devices</h2>
+          <span>Connected and previously seen</span>
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Device</th><th>Address</th><th>State</th><th>24h</th><th>Risk</th></tr></thead>
+            <thead><tr><th>Device</th><th>IP / MAC</th><th>State</th><th>24h</th><th>Risk</th></tr></thead>
             <tbody>
             {% for device in devices %}
               <tr>
                 <td><a href="/devices/{{ device.device_id }}">{{ device.hostname or device.device_id }}</a><small>{{ device.device_id }}</small></td>
-                <td>{{ device.ipv4 or '—' }}</td>
+                <td>{{ device.ipv4 or 'Unknown IP' }}<small>{{ device.mac_address or 'Unknown MAC' }}</small></td>
                 <td><span class="state {{ 'online' if device.connected else 'offline' }}">{{ 'online' if device.connected else 'offline' }}</span></td>
                 <td>{{ device.anomalies_24h }}</td>
                 <td><div class="risk"><span class="risk-bar {{ device.risk_level }}" style="width: {{ device.risk_score * 100 }}%"></span></div><b>{{ '%.2f'|format(device.risk_score) }}</b></td>
