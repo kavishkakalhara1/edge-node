@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from .config import Settings
 from .database import Database
-from .healing import SUPPORTED_ACTIONS
+from .healing import CLOUD_ACTIONS, SUPPORTED_ACTIONS
 
 PACKAGE_DIR = Path(__file__).parent
 settings = Settings.from_env()
@@ -60,7 +60,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="IoT Guard", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="IoT Guard", version="0.2.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=PACKAGE_DIR / "static"), name="static")
 
 
@@ -80,6 +80,7 @@ def device_detail(request: Request, device_id: str):
     data["feature_rows"] = [
         {"name": name, "value": values.get(name)} for name in model_feature_columns()
     ]
+    data["cloud_actions"] = CLOUD_ACTIONS
     return templates.TemplateResponse(request, "device.html", data)
 
 

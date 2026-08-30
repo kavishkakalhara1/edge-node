@@ -17,14 +17,28 @@ class FakeDatabase:
     def record_inference(self, device_id, observed_at, result, risk):
         self.recorded.append((device_id, observed_at, result, risk))
 
+    def create_healing_request(
+        self, request_id, action_id, device_id, parameters, source="dashboard"
+    ):
+        request = {
+            "request_id": request_id,
+            "action_id": action_id,
+            "device_id": device_id,
+            "parameters": parameters,
+            "source": source,
+        }
+        self.recorded.append(request)
+        return request
+
 
 class FakeCloud:
-    def __init__(self):
+    def __init__(self, response=True):
         self.payloads = []
+        self.response = response
 
     def submit(self, payload):
         self.payloads.append(payload)
-        return True
+        return self.response
 
 
 def collector_for_reporting():
@@ -114,6 +128,47 @@ def test_anomaly_reporting_waits_two_minutes_per_device(monkeypatch):
         "iot-2",
         "iot-1",
     ]
+
+
+def test_cloud_response_queues_supported_healing_action():
+    collector = collector_for_reporting()
+    collector.cloud = FakeCloud(
+        {"status": "accepted", "actions": [{"action_id": "NET-03", "device_id": "iot-1"}]}
+    )
+
+    collector._store_result(
+        "iot-1",
+        "2026-08-13T10:00:00+00:00",
+        {
+            "point_score": 2.0,
+            "temporal_score": None,
+            "ensemble_score": 2.0,
+            "is_anomaly": True,
+            "anomaly_type": "point",
+            "decision": "anomaly",
+        },
+        {},
+    )
+
+    queued = collector.database.recorded[-1]
+    assert queued["action_id"] == "NET-03"
+    assert queued["device_id"] == "iot-1"
+    assert queued["source"] == "cloud"
+
+
+def test_cloud_response_ignores_unsupported_healing_action():
+    collector = collector_for_reporting()
+    collector._queue_cloud_actions(
+        {
+            "actions": [
+                {"action_id": "ACC-03", "device_id": "iot-1"},
+                {"action_id": "SEG-03"},
+            ]
+        },
+        "2026-08-13T10:00:00+00:00",
+    )
+
+    assert collector.database.recorded == []
 
 
 def test_reporter_waits_for_delivery_and_blank_endpoint_disables_it():

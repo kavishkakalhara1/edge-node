@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from iot_guard import web
 from iot_guard.database import Database
+from iot_guard.healing import SUPPORTED_ACTIONS
 
 
 def client_for(tmp_path, monkeypatch):
@@ -107,4 +108,30 @@ def test_post_healing_action_requires_token_and_supported_id(tmp_path, monkeypat
             json={"parameters": {}},
         )
         assert unsupported.status_code == 422
-        assert unsupported.json()["detail"]["supported_action_ids"] == ["NET-03", "SEG-03"]
+        assert unsupported.json()["detail"]["supported_action_ids"] == sorted(
+            SUPPORTED_ACTIONS
+        )
+
+
+def test_dashboard_can_queue_device_unblock(tmp_path, monkeypatch):
+    client, database = client_for(tmp_path, monkeypatch)
+    with client:
+        database.upsert_device(
+            "iot-1",
+            "fingerprint",
+            "camera",
+            "10.42.0.2",
+            mac_address="02:00:00:00:00:01",
+        )
+        response = client.post(
+            "/api/devices/iot-1/healing-actions/UNBLOCK",
+            headers={"X-IoT-Guard-Token": "test-token"},
+            json={"parameters": {"reason": "demonstration reset"}},
+        )
+        page = client.get("/devices/iot-1")
+
+    assert response.status_code == 202
+    assert response.json()["action_id"] == "UNBLOCK"
+    assert "Healing actions" in page.text
+    assert "Unblock device" in page.text
+    assert "dashboard" in page.text

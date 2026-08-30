@@ -101,8 +101,21 @@ Healing requests use the catalogue action ID and the device ID. The web service 
 
 The installer generates `IOT_GUARD_HEALING_API_TOKEN` in `/etc/iot-guard/iot-guard.env`. Send it in the `X-IoT-Guard-Token` header. The currently implemented actions are:
 
-- `NET-03`: requires `source_ipv4`; optional `ttl_seconds` defaults to 300 and must be 60-3600.
+- `NET-01`, `NET-08`: bidirectional per-device `tc` rate control with configurable `rate_kbit` and `burst_kb`.
+- `NET-02`, `NET-05`, `ACC-01`: bounded nftables timeout responses for floods, scans, and progressive bans.
+- `NET-03`: temporarily blocks a source IPv4. Cloud responses default to the target device IPv4; `ttl_seconds` defaults to 300 and must be 60-3600.
+- `NET-04`: blocks a TCP or UDP destination port for one device; requires `port` and optionally `protocol`.
+- `NET-06`: blocks one destination IPv4 for one device; requires `destination_ipv4`.
+- `NET-07`: blocks an aggregate source network; requires `source_cidr`.
+- `SEG-02`: blocks the target device MAC in both traffic directions.
 - `SEG-03`: isolates the device's current leased IPv4; optional `heartbeat_ipv4` remains allowed.
+- `L2-01`, `L2-02`: restore and pin the trusted DHCP IP-to-MAC neighbor binding.
+- `ESC-01`: records an operator notification in the service journal.
+- `ESC-02`: applies permanent isolation only with `approved: true`.
+- `ESC-03`: stores a JSON incident snapshot with device, detection, and traffic evidence.
+- `UNBLOCK`: internal dashboard/API action that removes the target device IPv4 and MAC from all IoT Guard block sets.
+
+The complete action catalogue and Raspberry Pi feasibility assessment is stored in `docs/healing-actions.json`. Only actions marked `automatic: true` are accepted from cloud responses. Actions requiring policy parameters, external identity/device integrations, VLAN infrastructure, or operator approval are recorded in the catalogue but are not executed automatically.
 
 ```bash
 TOKEN='value-from-/etc/iot-guard/iot-guard.env'
@@ -180,7 +193,7 @@ The first anomaly for each device is stored locally, then synchronously sent as 
 }
 ```
 
-`network_features` contains the complete unscaled feature map computed for the window, not only the two example fields above. The collector waits up to the configured timeout for the response and logs the returned body, including any healing `actions`. After a successful response, that device waits 120 seconds before it can send another anomaly; each device has an independent interval. Failed requests are logged and remain eligible for retry on the next anomalous window. Benign windows and all inference/risk updates remain stored locally but are not sent.
+`network_features` contains the complete unscaled feature map computed for the window, not only the two example fields above. The collector waits up to the configured timeout for the response. Supported `actions` in the response are validated, stored in SQLite with cloud provenance, and executed by the privileged collector. After a successful response, that device waits 120 seconds before it can send another anomaly; each device has an independent interval. Failed requests are logged and remain eligible for retry on the next anomalous window. Benign windows and all inference/risk updates remain stored locally but are not sent.
 
 Cloud sockets are bound to `IOT_GUARD_CLOUD_UPLINK_INTERFACE` with Linux `SO_BINDTODEVICE`. The collector rejects configurations where this interface equals `IOT_GUARD_HOTSPOT_INTERFACE`, and hotspot setup marks the IoT connection as never-default. With the defaults, IoT clients use `wlan0` while cloud API traffic uses `eth0`, keeping the two interface bandwidths separate.
 

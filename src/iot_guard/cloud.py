@@ -80,7 +80,7 @@ class CloudReporter:
     def enabled(self) -> bool:
         return bool(self.endpoint)
 
-    def submit(self, payload: dict[str, Any]) -> bool:
+    def submit(self, payload: dict[str, Any]) -> Any | bool:
         if not self.enabled:
             return False
         try:
@@ -99,7 +99,7 @@ class CloudReporter:
             payload["flag"],
             response,
         )
-        return True
+        return response if response is not None else {}
 
     def close(self) -> None:
         pass

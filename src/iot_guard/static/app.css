@@ -92,7 +92,7 @@ main { padding: 28px clamp(20px, 5vw, 72px) 60px; }
 .latency-values p { margin-top: 3px; color: var(--muted); font-size: 11px; }
 
 .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; }
-.device-list, .alerts, .event-log, .traffic-panel {
+.device-list, .alerts, .event-log, .traffic-panel, .healing-panel {
   min-width: 0;
   border: 1px solid var(--line);
   background: var(--surface);
@@ -159,6 +159,25 @@ td:last-child { display: flex; align-items: center; gap: 8px; }
   text-transform: uppercase;
 }
 .facts strong { font-size: 14px; }
+.healing-panel { margin-bottom: 24px; }
+.healing-panel td:last-child { display: table-cell; }
+.unblock-button {
+  border: 1px solid var(--red);
+  border-radius: 4px;
+  padding: 8px 12px;
+  background: var(--surface);
+  color: var(--red);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+.unblock-button:hover { background: #fff1f0; }
+.action-status { font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.action-status.succeeded { color: var(--green); }
+.action-status.failed { color: var(--red); }
+.action-status.queued, .action-status.running { color: var(--amber); }
+.action-message { min-height: 35px; padding: 10px 16px; color: var(--muted); font-size: 12px; }
 .traffic-panel { margin-bottom: 24px; }
 .traffic-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .traffic-metrics > div { min-width: 0; padding: 18px 20px; border-right: 1px solid var(--line); }

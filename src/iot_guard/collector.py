@@ -15,7 +15,7 @@ from .cloud import CloudReporter
 from .config import Settings
 from .database import Database
 from .features import FeatureEngine, PacketObservation, WindowRecord
-from .healing import HealingWorker, NftablesHealingExecutor
+from .healing import CLOUD_ACTIONS, HealingWorker, NftablesHealingExecutor
 from .identity import DeviceIdentity
 from .leases import LeaseRegistry, associated_macs
 from .model import ProductionEnsemble
@@ -88,7 +88,10 @@ class Collector:
         self.capture = CaptureService(
             settings.capture_interfaces, self.leases, self._packet_ready
         )
-        self.healing = HealingWorker(self.database, NftablesHealingExecutor())
+        self.healing = HealingWorker(
+            self.database,
+            NftablesHealingExecutor(hotspot_interface=settings.hotspot_interface),
+        )
         self.cloud = CloudReporter(
             settings.cloud_api_endpoint,
             settings.cloud_uplink_interface,
@@ -223,7 +226,7 @@ class Collector:
         if enriched.get("is_anomaly"):
             now = time.monotonic()
             if now >= self.next_anomaly_report_at.get(device_id, 0.0):
-                delivered = self.cloud.submit(
+                response = self.cloud.submit(
                     {
                         "flag": "anomaly",
                         "risk_score": risk.current,
@@ -231,15 +234,61 @@ class Collector:
                         "device_id": device_id,
                     }
                 )
-                if delivered:
+                if response is not False:
                     self.next_anomaly_report_at[device_id] = (
                         time.monotonic() + self.anomaly_report_interval_seconds
                     )
+                    self._queue_cloud_actions(response, observed_at)
             LOGGER.warning(
                 "Anomaly device=%s type=%s risk=%.1f",
                 device_id,
                 enriched.get("anomaly_type"),
                 risk.current,
+            )
+
+    def _queue_cloud_actions(self, response: object, observed_at: str) -> None:
+        if not isinstance(response, dict):
+            return
+        actions = response.get("actions", [])
+        if not isinstance(actions, list):
+            LOGGER.error("Cloud response actions must be a list")
+            return
+        for index, action in enumerate(actions):
+            if not isinstance(action, dict):
+                LOGGER.error("Ignoring malformed cloud healing action: %r", action)
+                continue
+            action_id = str(action.get("action_id", "")).upper()
+            device_id = action.get("device_id")
+            if action_id not in CLOUD_ACTIONS or not isinstance(device_id, str):
+                LOGGER.error(
+                    "Ignoring unsupported cloud healing action action=%s device=%r",
+                    action_id,
+                    device_id,
+                )
+                continue
+            request_id = uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"iot-guard:{observed_at}:{index}:{action_id}:{device_id}",
+            ).hex
+            queued = self.database.create_healing_request(
+                request_id,
+                action_id,
+                device_id,
+                {},
+                source="cloud",
+            )
+            if queued is None:
+                LOGGER.error(
+                    "Cloud healing action references unknown device action=%s device=%s",
+                    action_id,
+                    device_id,
+                )
+                continue
+            LOGGER.info(
+                "Cloud healing action queued request=%s action=%s device=%s",
+                request_id,
+                action_id,
+                device_id,
             )
 
     def _window_ready(self, window: WindowRecord) -> None:

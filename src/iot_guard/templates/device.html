@@ -20,6 +20,27 @@
       <div><span>First seen</span><strong>{{ device.first_seen[:19]|replace('T', ' ') }}</strong></div>
       <div><span>Last seen</span><strong>{{ device.last_seen[:19]|replace('T', ' ') }}</strong></div>
     </section>
+    <section class="healing-panel">
+      <div class="section-heading">
+        <h2>Healing actions</h2>
+        <button class="unblock-button" type="button" onclick="unblockDevice()">Unblock device</button>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Time</th><th>Action</th><th>Source</th><th>Status</th><th>Result</th></tr></thead>
+        <tbody>
+        {% for request in healing_requests %}
+          <tr>
+            <td>{{ request.requested_at[:19]|replace('T', ' ') }}</td>
+            <td>{{ request.action_id }}{% if request.action_id in cloud_actions %}<small>{{ cloud_actions[request.action_id].name }}</small>{% endif %}</td>
+            <td>{{ request.source }}</td>
+            <td><span class="action-status {{ request.status }}">{{ request.status }}</span></td>
+            <td>{{ request.error or ('Applied' if request.status == 'succeeded' else 'Pending') }}</td>
+          </tr>
+        {% else %}<tr><td colspan="5" class="empty">No healing actions received.</td></tr>{% endfor %}
+        </tbody>
+      </table></div>
+      <p class="action-message" id="action-message" role="status"></p>
+    </section>
     <section class="traffic-panel">
       <div class="section-heading"><h2>Monitored traffic</h2><span>Last 24 hours</span></div>
       <div class="traffic-metrics">
@@ -78,5 +99,24 @@
       </table></div>
     </section>
   </main>
+  <script>
+    async function unblockDevice() {
+      const token = window.prompt("Healing API token");
+      if (!token) return;
+      const message = document.getElementById("action-message");
+      const response = await fetch("/api/devices/{{ device.device_id }}/healing-actions/UNBLOCK", {
+        method: "POST",
+        headers: {"Content-Type": "application/json", "X-IoT-Guard-Token": token},
+        body: JSON.stringify({parameters: {reason: "dashboard demonstration reset"}})
+      });
+      if (response.ok) {
+        message.textContent = "Unblock queued. The collector will apply it shortly.";
+        window.setTimeout(() => window.location.reload(), 1500);
+      } else {
+        const body = await response.json();
+        message.textContent = body.detail || "Unable to queue unblock action.";
+      }
+    }
+  </script>
 </body>
 </html>

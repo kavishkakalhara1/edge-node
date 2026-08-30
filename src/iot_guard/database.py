@@ -74,7 +74,8 @@ CREATE TABLE IF NOT EXISTS healing_action_requests (
     completed_at TEXT,
     parameters_json TEXT NOT NULL DEFAULT '{}',
     result_json TEXT,
-    error TEXT
+    error TEXT,
+    source TEXT NOT NULL DEFAULT 'dashboard'
 );
 CREATE INDEX IF NOT EXISTS idx_healing_requests_status_time
 ON healing_action_requests(status, requested_at);
@@ -133,6 +134,14 @@ class Database:
             if "features_json" not in window_columns:
                 connection.execute(
                     "ALTER TABLE traffic_windows ADD COLUMN features_json TEXT NOT NULL DEFAULT '{}'"
+                )
+            healing_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(healing_action_requests)")
+            }
+            if "source" not in healing_columns:
+                connection.execute(
+                    "ALTER TABLE healing_action_requests ADD COLUMN source TEXT NOT NULL DEFAULT 'dashboard'"
                 )
             connection.commit()
             self._migrate_device_ids(connection)
@@ -299,7 +308,12 @@ class Database:
             )
 
     def create_healing_request(
-        self, request_id: str, action_id: str, device_id: str, parameters: dict
+        self,
+        request_id: str,
+        action_id: str,
+        device_id: str,
+        parameters: dict,
+        source: str = "dashboard",
     ) -> dict | None:
         now = utc_now()
         with self.connect() as connection:
@@ -309,10 +323,10 @@ class Database:
             if device is None:
                 return None
             connection.execute(
-                """INSERT INTO healing_action_requests(
-                    request_id, action_id, device_id, requested_at, parameters_json
-                ) VALUES (?, ?, ?, ?, ?)""",
-                (request_id, action_id, device_id, now, json.dumps(parameters)),
+                """INSERT OR IGNORE INTO healing_action_requests(
+                    request_id, action_id, device_id, requested_at, parameters_json, source
+                ) VALUES (?, ?, ?, ?, ?, ?)""",
+                (request_id, action_id, device_id, now, json.dumps(parameters), source),
             )
         return self.healing_request(request_id)
 
@@ -327,7 +341,8 @@ class Database:
         with self.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
-                """SELECT r.*, d.ipv4, d.connected FROM healing_action_requests r
+                """SELECT r.*, d.ipv4, d.mac_address, d.connected
+                FROM healing_action_requests r
                 JOIN devices d USING(device_id)
                 WHERE r.status = 'queued' ORDER BY r.requested_at LIMIT 1"""
             ).fetchone()
@@ -370,6 +385,44 @@ class Database:
         item["parameters"] = json.loads(item.pop("parameters_json"))
         item["result"] = json.loads(item.pop("result_json")) if item["result_json"] else None
         return item
+
+    def device_healing_requests(self, device_id: str, limit: int = 50) -> list[dict]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT * FROM healing_action_requests WHERE device_id = ?
+                ORDER BY requested_at DESC LIMIT ?""",
+                (device_id, limit),
+            ).fetchall()
+        return [self._healing_request_dict(row) for row in rows]
+
+    def device_incident_summary(self, device_id: str) -> dict:
+        with self.connect() as connection:
+            device = connection.execute(
+                """SELECT device_id, mac_address, hostname, ipv4, connected,
+                    risk_score, risk_level, first_seen, last_seen
+                FROM devices WHERE device_id = ?""",
+                (device_id,),
+            ).fetchone()
+            counts = connection.execute(
+                """SELECT COUNT(*) AS inference_count,
+                    SUM(CASE WHEN decision = 'anomaly' THEN 1 ELSE 0 END) AS anomaly_count,
+                    MAX(observed_at) AS latest_inference
+                FROM anomaly_events WHERE device_id = ?""",
+                (device_id,),
+            ).fetchone()
+            traffic = connection.execute(
+                """SELECT COUNT(*) AS window_count,
+                    COALESCE(SUM(packet_count), 0) AS packet_count,
+                    COALESCE(SUM(byte_count), 0) AS byte_count
+                FROM traffic_windows WHERE device_id = ?""",
+                (device_id,),
+            ).fetchone()
+        return {
+            "generated_at": utc_now(),
+            "device": dict(device) if device is not None else None,
+            "detections": dict(counts),
+            "traffic": dict(traffic),
+        }
 
     def dashboard(self) -> dict:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
@@ -444,6 +497,7 @@ class Database:
             "windows": windows,
             "traffic": traffic,
             "latest_features": latest_features,
+            "healing_requests": self.device_healing_requests(device_id),
         }
 
     def reset_daily_risk(self, now: datetime | None = None) -> int:
