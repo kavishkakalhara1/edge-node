@@ -26,6 +26,21 @@ def test_database_records_device_and_inference(tmp_path):
         "raw_score": 3.5,
         "raw_threshold": 2.5,
         "model_version": "gru-svdd-test",
+        "attack_context": {
+            "basis": "dominant_incoming_peer",
+            "attacker": {
+                "device_id": "attacker-1",
+                "mac_address": "02:00:00:00:00:02",
+                "ipv4": "10.42.0.3",
+                "hostname": "scanner",
+            },
+            "victim": {
+                "device_id": "iot-1",
+                "mac_address": "02:00:00:00:00:01",
+                "ipv4": "10.42.0.2",
+                "hostname": "camera",
+            },
+        },
     }
     risk = update_risk(0, None, {**result, "is_anomaly": True, "point_ratio": 2})
     database.record_inference("iot-1", datetime.now(UTC).isoformat(), result, risk)
@@ -39,6 +54,8 @@ def test_database_records_device_and_inference(tmp_path):
     assert dashboard["recent"][0]["raw_score"] == 3.5
     assert dashboard["recent"][0]["raw_threshold"] == 2.5
     assert dashboard["recent"][0]["model_version"] == "gru-svdd-test"
+    assert dashboard["recent"][0]["attacker"]["ipv4"] == "10.42.0.3"
+    assert database.device_detail("iot-1")["events"][0]["attacker"]["hostname"] == "scanner"
 
 
 def test_daily_reset_clears_current_risk_but_keeps_history(tmp_path):

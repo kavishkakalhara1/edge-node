@@ -1,10 +1,14 @@
 from unittest.mock import Mock
+from types import SimpleNamespace
+from datetime import datetime, timezone
 
 import pytest
 
 from iot_guard.cloud import CloudReporter
 from iot_guard.collector import Collector
 from iot_guard.config import Settings
+from iot_guard.features import WindowRecord
+from iot_guard.identity import DeviceIdentity
 
 
 class FakeDatabase:
@@ -180,6 +184,94 @@ def test_cloud_response_ignores_unsupported_healing_action():
             ]
         },
         "2026-08-13T10:00:00+00:00",
+    )
+
+    assert collector.database.recorded == []
+
+
+def test_peer_attack_context_and_role_based_healing_target_attacker():
+    collector = collector_for_reporting()
+    collector.settings = SimpleNamespace(protected_device_macs=())
+    collector.identity = DeviceIdentity(b"x" * 32)
+    collector.features = SimpleNamespace(
+        devices={
+            "attacker-id": "02:00:00:00:00:01",
+            "victim-id": "02:00:00:00:00:02",
+        }
+    )
+    collector.leases = SimpleNamespace(
+        by_mac={
+            "02:00:00:00:00:01": SimpleNamespace(
+                ipv4="192.168.50.20", hostname="attacker"
+            ),
+            "02:00:00:00:00:02": SimpleNamespace(
+                ipv4="192.168.50.30", hostname="camera"
+            ),
+        }
+    )
+    victim_window = WindowRecord(
+        device_id="victim-id",
+        start=datetime.now(timezone.utc),
+        resolution_seconds=2,
+        features={"network_packets_dst_count": 20.0, "network_packets_src_count": 2.0},
+        packet_count=22,
+        byte_count=2200,
+        top_incoming_peer_mac="02:00:00:00:00:01",
+        top_incoming_peer_ip="192.168.50.20",
+    )
+    attacker_window = WindowRecord(
+        device_id="attacker-id",
+        start=datetime.now(timezone.utc),
+        resolution_seconds=2,
+        features={"network_packets_dst_count": 2.0, "network_packets_src_count": 20.0},
+        packet_count=22,
+        byte_count=2200,
+        top_outgoing_peer_mac="02:00:00:00:00:02",
+        top_outgoing_peer_ip="192.168.50.30",
+    )
+
+    victim_context = collector._attack_context(victim_window)
+    attacker_context = collector._attack_context(attacker_window)
+
+    assert victim_context["attacker"] == attacker_context["attacker"]
+    assert victim_context["victim"] == attacker_context["victim"]
+    collector._store_result(
+        "victim-id",
+        "2026-09-01T10:00:00+00:00",
+        {
+            "point_score": 2.0,
+            "temporal_score": None,
+            "ensemble_score": 2.0,
+            "is_anomaly": True,
+            "anomaly_type": "point",
+            "decision": "anomaly",
+        },
+        {},
+        victim_context,
+    )
+    assert collector.cloud.payloads[-1]["attack_context"] == victim_context
+    collector._queue_cloud_actions(
+        {"actions": [{"action_id": "NET-03", "target": "attacker"}]},
+        "2026-09-01T10:00:00+00:00",
+        victim_context,
+    )
+    queued = collector.database.recorded[-1]
+    assert queued["device_id"] == "attacker-id"
+    assert queued["parameters"]["source_ipv4"] == "192.168.50.20"
+    assert queued["parameters"]["victim_device_id"] == "victim-id"
+
+
+def test_cloud_healing_cannot_target_protected_access_point():
+    collector = collector_for_reporting()
+    collector.settings = SimpleNamespace(
+        protected_device_macs=("38:2c:e5:1d:02:fb",)
+    )
+    collector.identity = DeviceIdentity(b"x" * 32)
+    protected_id = collector.identity.device_id("38:2c:e5:1d:02:fb")
+
+    collector._queue_cloud_actions(
+        {"actions": [{"action_id": "SEG-03", "device_id": protected_id}]},
+        "2026-09-01T10:00:00+00:00",
     )
 
     assert collector.database.recorded == []

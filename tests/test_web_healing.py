@@ -1,10 +1,12 @@
 from dataclasses import replace
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
 from iot_guard import web
 from iot_guard.database import Database
 from iot_guard.healing import SUPPORTED_ACTIONS
+from iot_guard.risk import update_risk
 
 
 def client_for(tmp_path, monkeypatch):
@@ -76,6 +78,44 @@ def test_dashboard_omits_ignored_device_mac(tmp_path, monkeypatch):
     ]
 
 
+def test_dashboards_show_suspected_attacker_details(tmp_path, monkeypatch):
+    client, database = client_for(tmp_path, monkeypatch)
+    with client:
+        database.upsert_device("victim", "victim-fingerprint", "camera", "10.42.0.30")
+        result = {
+            "point_anomaly": True,
+            "temporal_anomaly": False,
+            "is_anomaly": True,
+            "anomaly_type": "point",
+            "decision": "anomaly",
+            "attack_context": {
+                "basis": "dominant_incoming_peer",
+                "attacker": {
+                    "device_id": "attacker",
+                    "mac_address": "02:00:00:00:00:01",
+                    "ipv4": "10.42.0.20",
+                    "hostname": "scanner",
+                },
+                "victim": {
+                    "device_id": "victim",
+                    "mac_address": "02:00:00:00:00:02",
+                    "ipv4": "10.42.0.30",
+                    "hostname": "camera",
+                },
+            },
+        }
+        risk = update_risk(0, None, result)
+        database.record_inference("victim", datetime.now(UTC).isoformat(), result, risk)
+
+        dashboard = client.get("/")
+        device_page = client.get("/devices/victim")
+
+    assert "Suspected attacker" in dashboard.text
+    assert "scanner" in dashboard.text
+    assert "10.42.0.20" in device_page.text
+    assert "02:00:00:00:00:01" in device_page.text
+
+
 def test_device_detail_returns_monitored_traffic(tmp_path, monkeypatch):
     client, database = client_for(tmp_path, monkeypatch)
     with client:
@@ -143,7 +183,11 @@ def test_device_detail_shows_attacker_ip_for_healing_action(tmp_path, monkeypatc
             "request-1",
             "NET-03",
             "iot-1",
-            {"source_ipv4": "192.0.2.8", "ttl_seconds": 300},
+            {
+                "source_ipv4": "192.0.2.8",
+                "attacker_mac": "02:00:00:00:00:02",
+                "ttl_seconds": 300,
+            },
             source="cloud",
         )
         database.claim_healing_request()
@@ -156,8 +200,9 @@ def test_device_detail_shows_attacker_ip_for_healing_action(tmp_path, monkeypatc
         page = client.get("/devices/iot-1")
 
     assert page.status_code == 200
-    assert "Attacker IP" in page.text
+    assert "Attacker" in page.text
     assert "192.0.2.8" in page.text
+    assert "02:00:00:00:00:02" in page.text
     assert "succeeded" in page.text
 
 

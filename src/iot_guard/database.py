@@ -271,7 +271,13 @@ class Database:
                     result.get("model_version"),
                     risk.previous,
                     risk.current,
-                    json.dumps({"severity": risk.severity}, separators=(",", ":")),
+                    json.dumps(
+                        {
+                            "severity": risk.severity,
+                            "attack_context": result.get("attack_context"),
+                        },
+                        separators=(",", ":"),
+                    ),
                 ),
             )
 
@@ -385,6 +391,8 @@ class Database:
         item["parameters"] = json.loads(item.pop("parameters_json"))
         item["result"] = json.loads(item.pop("result_json")) if item["result_json"] else None
         item["attacker_ip"] = None
+        item["attacker_mac"] = None
+        item["attacker_device_id"] = None
         for key in (
             "attacker_ip",
             "attacker_ipv4",
@@ -398,6 +406,11 @@ class Database:
                     break
             if item["attacker_ip"] is not None:
                 break
+        for key in ("attacker_mac", "attacker_device_id"):
+            for details in (item["result"], item["parameters"]):
+                if isinstance(details, dict) and details.get(key):
+                    item[key] = str(details[key])
+                    break
         return item
 
     def device_healing_requests(self, device_id: str, limit: int = 50) -> list[dict]:
@@ -455,7 +468,7 @@ class Database:
                     SUM(CASE WHEN risk_score >= 0.50 THEN 1 ELSE 0 END) AS elevated
                     FROM devices"""
             ).fetchone())
-            recent = [dict(row) for row in connection.execute(
+            recent = [self._anomaly_event_dict(row) for row in connection.execute(
                 """SELECT e.*, d.hostname, d.ipv4 FROM anomaly_events e
                     JOIN devices d USING(device_id) WHERE e.decision = 'anomaly'
                     ORDER BY e.observed_at DESC LIMIT 50"""
@@ -470,7 +483,7 @@ class Database:
             ).fetchone()
             if row is None:
                 return None
-            events = [dict(item) for item in connection.execute(
+            events = [self._anomaly_event_dict(item) for item in connection.execute(
                 "SELECT * FROM anomaly_events WHERE device_id = ? ORDER BY observed_at DESC LIMIT 200",
                 (device_id,),
             )]
@@ -513,6 +526,20 @@ class Database:
             "latest_features": latest_features,
             "healing_requests": self.device_healing_requests(device_id),
         }
+
+    @staticmethod
+    def _anomaly_event_dict(row: sqlite3.Row) -> dict:
+        item = dict(row)
+        details = json.loads(item["details_json"])
+        attack_context = details.get("attack_context")
+        item["details"] = details
+        item["attacker"] = (
+            attack_context.get("attacker") if isinstance(attack_context, dict) else None
+        )
+        item["victim"] = (
+            attack_context.get("victim") if isinstance(attack_context, dict) else None
+        )
+        return item
 
     def reset_daily_risk(self, now: datetime | None = None) -> int:
         current_date = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).date().isoformat()

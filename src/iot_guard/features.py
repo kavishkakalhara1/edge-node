@@ -37,6 +37,10 @@ class WindowRecord:
     features: dict[str, float]
     packet_count: int
     byte_count: int
+    top_incoming_peer_mac: str | None = None
+    top_incoming_peer_ip: str | None = None
+    top_outgoing_peer_mac: str | None = None
+    top_outgoing_peer_ip: str | None = None
 
 
 def _stats(values: list[float], prefix: str) -> dict[str, float]:
@@ -86,6 +90,8 @@ class FeatureAccumulator:
     packet_count: int = 0
     packets_src: int = 0
     packets_dst: int = 0
+    incoming_peers: dict[tuple[str, str | None], int] = field(default_factory=dict)
+    outgoing_peers: dict[tuple[str, str | None], int] = field(default_factory=dict)
     fragmented_packets: int = 0
     byte_count: int = 0
     last_timestamp: float | None = None
@@ -99,6 +105,13 @@ class FeatureAccumulator:
         self.byte_count += packet.packet_size
         self.packets_src += int(outgoing)
         self.packets_dst += int(not outgoing)
+        peers = self.outgoing_peers if outgoing else self.incoming_peers
+        peer = (
+            (packet.dst_mac, packet.dst_ip)
+            if outgoing
+            else (packet.src_mac, packet.src_ip)
+        )
+        peers[peer] = peers.get(peer, 0) + 1
         self.fragmented_packets += int(packet.fragmented)
         self.packet_sizes.append(float(packet.packet_size))
         self.macs_all.update((packet.src_mac, packet.dst_mac))
@@ -139,6 +152,8 @@ class FeatureAccumulator:
                 self.tcp_flag_counts[name] += int(bool(packet.tcp_flags & bit))
 
     def finish(self) -> WindowRecord:
+        incoming_peer = max(self.incoming_peers, key=self.incoming_peers.get, default=None)
+        outgoing_peer = max(self.outgoing_peers, key=self.outgoing_peers.get, default=None)
         features: dict[str, float] = {
             "log_data-ranges_avg": 0.0,
             "log_data-ranges_max": 0.0,
@@ -193,6 +208,10 @@ class FeatureAccumulator:
             features=features,
             packet_count=self.packet_count,
             byte_count=self.byte_count,
+            top_incoming_peer_mac=incoming_peer[0] if incoming_peer else None,
+            top_incoming_peer_ip=incoming_peer[1] if incoming_peer else None,
+            top_outgoing_peer_mac=outgoing_peer[0] if outgoing_peer else None,
+            top_outgoing_peer_ip=outgoing_peer[1] if outgoing_peer else None,
         )
 
 

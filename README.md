@@ -140,7 +140,7 @@ A DHCP lease registers a connected client. Its MAC is normalized in memory and t
 device_id = "id-" + normalized_mac_without_colons
 ```
 
-The database stores `device_id`, a separate HMAC audit fingerprint, and the normalized MAC for display on the local dashboard. MAC addresses are not included in model features or cloud anomaly reports. For every active device, the feature engine emits aggregated numeric records:
+The database stores `device_id`, a separate HMAC audit fingerprint, and the normalized MAC for display on the local dashboard. MAC addresses are never included in model features. For local client-to-client anomalies, the cloud report includes the suspected attacker and victim identities as response metadata. For every active device, the feature engine emits aggregated numeric records:
 
 - One record every 2 seconds.
 - One record every 10 seconds.
@@ -189,11 +189,30 @@ The first anomaly for each device is stored locally, then synchronously sent as 
         "network_packets_all_count": 12.0,
         "network_ttl_avg": 63.5
     },
-    "device_id": "id-aabbccddeeff"
+    "device_id": "id-aabbccddeeff",
+    "attack_context": {
+        "basis": "dominant_incoming_peer",
+        "attacker": {
+            "device_id": "id-020000000001",
+            "mac_address": "02:00:00:00:00:01",
+            "ipv4": "10.42.0.20",
+            "hostname": "scanner"
+        },
+        "victim": {
+            "device_id": "id-aabbccddeeff",
+            "mac_address": "aa:bb:cc:dd:ee:ff",
+            "ipv4": "10.42.0.30",
+            "hostname": "camera"
+        }
+    }
 }
 ```
 
-`network_features` contains the complete unscaled feature map computed for the window, not only the two example fields above. The collector waits up to the configured timeout for the response. Supported `actions` in the response are validated, stored in SQLite with cloud provenance, and executed by the privileged collector. After a successful response, that device waits 120 seconds before it can send another anomaly; each device has an independent interval. Failed requests are logged and remain eligible for retry on the next anomalous window. Benign windows and all inference/risk updates remain stored locally but are not sent.
+`network_features` contains the complete unscaled feature map computed for the window, not only the two example fields above. `attack_context` is present when the dominant peer is another registered hotspot client; it is directional evidence and therefore labels the initiator as suspected rather than proven malicious.
+
+Cloud actions may specify an explicit `device_id` or `"target": "attacker"` / `"target": "victim"`. Role-based targets are resolved from `attack_context`. The collector rejects protected-device targets, stores accepted actions in SQLite with cloud provenance, and executes them through the privileged collector. `NET-03` actions targeting the attacker automatically use the attacker IPv4 as `source_ipv4`.
+
+After a successful response, that device waits 120 seconds before it can send another anomaly; each device has an independent interval. Failed requests are logged and remain eligible for retry on the next anomalous window. Benign windows and all inference/risk updates remain stored locally but are not sent.
 
 Cloud sockets are bound to `IOT_GUARD_CLOUD_UPLINK_INTERFACE` with Linux `SO_BINDTODEVICE`. The collector rejects configurations where this interface equals `IOT_GUARD_HOTSPOT_INTERFACE`, and hotspot setup marks the IoT connection as never-default. With the defaults, IoT clients use `wlan0` while cloud API traffic uses `eth0`, keeping the two interface bandwidths separate.
 

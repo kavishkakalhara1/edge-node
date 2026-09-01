@@ -71,7 +71,11 @@
         {% for event in recent[:12] %}
           <li>
             <span class="alert-mark {{ event.anomaly_type }}"></span>
-            <div><a href="/devices/{{ event.device_id }}">{{ event.hostname or event.device_id }}</a><p>{{ event.anomaly_type|replace('_', ' ') }} · risk {{ '%.2f'|format(event.risk_after) }}</p></div>
+            <div>
+              <a href="/devices/{{ event.device_id }}">{{ event.hostname or event.device_id }}</a>
+              <p>{{ event.anomaly_type|replace('_', ' ') }} · risk {{ '%.2f'|format(event.risk_after) }}</p>
+              {% if event.attacker %}<p>Suspected attacker: {{ event.attacker.hostname or event.attacker.ipv4 or event.attacker.device_id }} · {{ event.attacker.mac_address }}</p>{% endif %}
+            </div>
             <time>{{ event.observed_at|sl_time }}</time>
           </li>
         {% else %}

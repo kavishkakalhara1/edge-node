@@ -217,8 +217,11 @@ class Collector:
         observed_at: str,
         result: dict,
         network_features: dict[str, float],
+        attack_context: dict | None = None,
     ) -> None:
         enriched = self._ratios(result)
+        if attack_context is not None:
+            enriched["attack_context"] = attack_context
         current, updated_at, consecutive_anomalies = self.database.device_risk(device_id)
         risk = update_risk(
             current,
@@ -230,19 +233,20 @@ class Collector:
         if enriched.get("is_anomaly"):
             now = time.monotonic()
             if now >= self.next_anomaly_report_at.get(device_id, 0.0):
-                response = self.cloud.submit(
-                    {
-                        "flag": "anomaly",
-                        "risk_score": risk.current,
-                        "network_features": dict(network_features),
-                        "device_id": device_id,
-                    }
-                )
+                payload = {
+                    "flag": "anomaly",
+                    "risk_score": risk.current,
+                    "network_features": dict(network_features),
+                    "device_id": device_id,
+                }
+                if attack_context is not None:
+                    payload["attack_context"] = attack_context
+                response = self.cloud.submit(payload)
                 if response is not False:
                     self.next_anomaly_report_at[device_id] = (
                         time.monotonic() + self.anomaly_report_interval_seconds
                     )
-                    self._queue_cloud_actions(response, observed_at)
+                    self._queue_cloud_actions(response, observed_at, attack_context)
             LOGGER.warning(
                 "Anomaly device=%s type=%s risk=%.1f",
                 device_id,
@@ -250,7 +254,12 @@ class Collector:
                 risk.current,
             )
 
-    def _queue_cloud_actions(self, response: object, observed_at: str) -> None:
+    def _queue_cloud_actions(
+        self,
+        response: object,
+        observed_at: str,
+        attack_context: dict | None = None,
+    ) -> None:
         if not isinstance(response, dict):
             return
         actions = response.get("actions", [])
@@ -263,10 +272,22 @@ class Collector:
                 continue
             action_id = str(action.get("action_id", "")).upper()
             device_id = action.get("device_id")
+            target_role = action.get("target")
+            if target_role in {"attacker", "victim"} and attack_context is not None:
+                target = attack_context.get(target_role)
+                if isinstance(target, dict):
+                    device_id = target.get("device_id")
             parameters = action.get("parameters", {})
             if action_id not in CLOUD_ACTIONS or not isinstance(device_id, str):
                 LOGGER.error(
                     "Ignoring unsupported cloud healing action action=%s device=%r",
+                    action_id,
+                    device_id,
+                )
+                continue
+            if self._protected_target(device_id, attack_context):
+                LOGGER.error(
+                    "Ignoring healing action targeting protected device action=%s device=%s",
                     action_id,
                     device_id,
                 )
@@ -284,6 +305,17 @@ class Collector:
             ):
                 if key in action and key not in parameters:
                     parameters[key] = action[key]
+            if attack_context is not None:
+                attacker = attack_context.get("attacker")
+                victim = attack_context.get("victim")
+                if isinstance(attacker, dict):
+                    parameters.setdefault("attacker_device_id", attacker.get("device_id"))
+                    parameters.setdefault("attacker_mac", attacker.get("mac_address"))
+                    parameters.setdefault("attacker_ip", attacker.get("ipv4"))
+                    if action_id == "NET-03" and attacker.get("ipv4"):
+                        parameters.setdefault("source_ipv4", attacker["ipv4"])
+                if isinstance(victim, dict):
+                    parameters.setdefault("victim_device_id", victim.get("device_id"))
             request_id = uuid.uuid5(
                 uuid.NAMESPACE_URL,
                 f"iot-guard:{observed_at}:{index}:{action_id}:{device_id}",
@@ -308,6 +340,59 @@ class Collector:
                 action_id,
                 device_id,
             )
+
+    def _protected_target(self, device_id: str, attack_context: dict | None) -> bool:
+        settings = getattr(self, "settings", None)
+        protected_macs = set(getattr(settings, "protected_device_macs", ()))
+        if not protected_macs:
+            return False
+        if attack_context is not None:
+            for role in ("attacker", "victim"):
+                details = attack_context.get(role)
+                if (
+                    isinstance(details, dict)
+                    and details.get("device_id") == device_id
+                    and details.get("mac_address") in protected_macs
+                ):
+                    return True
+        identity = getattr(self, "identity", None)
+        return identity is not None and device_id in {
+            identity.device_id(mac) for mac in protected_macs
+        }
+
+    def _attack_context(self, window: WindowRecord) -> dict | None:
+        devices_by_mac = {
+            mac: device_id for device_id, mac in self.features.devices.items()
+        }
+        protected_macs = set(self.settings.protected_device_macs)
+
+        def details(mac_address: str | None, ipv4: str | None) -> dict | None:
+            if mac_address is None or mac_address in protected_macs:
+                return None
+            device_id = devices_by_mac.get(mac_address)
+            if device_id is None:
+                return None
+            lease = self.leases.by_mac.get(mac_address)
+            return {
+                "device_id": device_id,
+                "mac_address": mac_address,
+                "ipv4": lease.ipv4 if lease is not None else ipv4,
+                "hostname": lease.hostname if lease is not None else None,
+            }
+
+        current_mac = self.features.devices.get(window.device_id)
+        current = details(current_mac, None)
+        incoming = details(window.top_incoming_peer_mac, window.top_incoming_peer_ip)
+        outgoing = details(window.top_outgoing_peer_mac, window.top_outgoing_peer_ip)
+        incoming_count = window.features.get("network_packets_dst_count", 0.0)
+        outgoing_count = window.features.get("network_packets_src_count", 0.0)
+        if current is None:
+            return None
+        if incoming is not None and incoming_count >= outgoing_count:
+            return {"basis": "dominant_incoming_peer", "attacker": incoming, "victim": current}
+        if outgoing is not None:
+            return {"basis": "dominant_outgoing_peer", "attacker": current, "victim": outgoing}
+        return None
 
     def _window_ready(self, window: WindowRecord) -> None:
         observed_at = window.start.astimezone(timezone.utc).isoformat()
@@ -373,7 +458,13 @@ class Collector:
             "raw_threshold": score["raw_threshold"],
             "model_version": score["model_version"],
         }
-        self._store_result(window.device_id, observed_at, result, window.features)
+        self._store_result(
+            window.device_id,
+            observed_at,
+            result,
+            window.features,
+            self._attack_context(window),
+        )
 
 
 def main() -> None:

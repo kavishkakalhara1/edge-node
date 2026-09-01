@@ -53,3 +53,15 @@ def test_feature_accumulator_tracks_direction_and_statistics():
     assert result.features["network_tcp-flags-syn_count"] == 2
     assert result.features["network_time-delta_avg"] == 0.5
     assert MODEL_FEATURES <= result.features.keys()
+
+
+def test_feature_window_retains_dominant_incoming_peer():
+    accumulator = FeatureAccumulator("victim", "02:00:00:00:00:02", 0, 2)
+    accumulator.add(packet(1.0))
+    accumulator.add(packet(1.5))
+
+    result = accumulator.finish()
+
+    assert result.top_incoming_peer_mac == "02:00:00:00:00:01"
+    assert result.top_incoming_peer_ip == "10.42.0.2"
+    assert result.top_outgoing_peer_mac is None

@@ -26,13 +26,13 @@
         <button class="unblock-button" type="button" onclick="unblockDevice()">Unblock device</button>
       </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Time</th><th>Action</th><th>Attacker IP</th><th>Source</th><th>Status</th><th>Result</th></tr></thead>
+        <thead><tr><th>Time</th><th>Action</th><th>Attacker</th><th>Source</th><th>Status</th><th>Result</th></tr></thead>
         <tbody>
         {% for request in healing_requests %}
           <tr>
             <td>{{ request.requested_at|sl_datetime }}</td>
             <td>{{ request.action_id }}{% if request.action_id in cloud_actions %}<small>{{ cloud_actions[request.action_id].name }}</small>{% endif %}</td>
-            <td>{{ request.attacker_ip or 'Not provided' }}</td>
+            <td>{{ request.attacker_ip or 'Not provided' }}{% if request.attacker_mac %}<small>{{ request.attacker_mac }}</small>{% endif %}</td>
             <td>{{ request.source }}</td>
             <td><span class="action-status {{ request.status }}">{{ request.status }}</span></td>
             <td>{{ request.error or ('Applied' if request.status == 'succeeded' else 'Pending') }}</td>
@@ -88,14 +88,15 @@
     <section class="event-log">
       <div class="section-heading"><h2>Detection history</h2><span>Most recent 200 decisions</span></div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Time</th><th>Decision</th><th>Type</th><th>Point</th><th>Temporal</th><th>Fused</th><th>Risk</th></tr></thead>
+        <thead><tr><th>Time</th><th>Decision</th><th>Type</th><th>Suspected attacker</th><th>Point</th><th>Temporal</th><th>Fused</th><th>Risk</th></tr></thead>
         <tbody>
         {% for event in events %}
           <tr class="{{ 'anomaly-row' if event.decision == 'anomaly' else '' }}">
             <td>{{ event.observed_at|sl_datetime }}</td><td>{{ event.decision }}</td><td>{{ event.anomaly_type|replace('_', ' ') }}</td>
+            <td>{% if event.attacker %}{{ event.attacker.hostname or event.attacker.ipv4 or event.attacker.device_id }}<small>{{ event.attacker.mac_address }}{% if event.attacker.ipv4 %} · {{ event.attacker.ipv4 }}{% endif %}</small>{% else %}Not identified{% endif %}</td>
             <td>{{ '%.2f'|format(event.point_score or 0) }}</td><td>{{ '%.2f'|format(event.temporal_score or 0) }}</td><td>{{ '%.2f'|format(event.ensemble_score or 0) }}</td><td>{{ '%.2f'|format(event.risk_after) }}</td>
           </tr>
-        {% else %}<tr><td colspan="7" class="empty">No inference results yet.</td></tr>{% endfor %}
+        {% else %}<tr><td colspan="8" class="empty">No inference results yet.</td></tr>{% endfor %}
         </tbody>
       </table></div>
     </section>
