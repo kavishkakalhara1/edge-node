@@ -14,6 +14,13 @@ def client_for(tmp_path, monkeypatch):
     return TestClient(web.app), database
 
 
+def test_sri_lanka_time_filters_convert_utc():
+    timestamp = "2026-08-31T14:55:54+00:00"
+
+    assert web.sl_datetime(timestamp) == "2026-08-31 20:25:54"
+    assert web.sl_time(timestamp) == "20:25:54"
+
+
 def test_dashboard_shows_connected_device_addresses(tmp_path, monkeypatch):
     client, database = client_for(tmp_path, monkeypatch)
     with client:
@@ -31,6 +38,42 @@ def test_dashboard_shows_connected_device_addresses(tmp_path, monkeypatch):
     assert "10.42.0.2" in response.text
     assert "02:00:00:00:00:01" in response.text
     assert "online" in response.text
+
+
+def test_dashboard_omits_ignored_device_mac(tmp_path, monkeypatch):
+    client, database = client_for(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        web,
+        "settings",
+        replace(web.settings, ignored_device_macs=("38:2c:e5:1d:02:fb",)),
+    )
+    with client:
+        database.upsert_device(
+            "ignored-device",
+            "ignored-fingerprint",
+            "wlan1",
+            "192.168.50.67",
+            mac_address="38:2c:e5:1d:02:fb",
+        )
+        database.upsert_device(
+            "visible-device",
+            "visible-fingerprint",
+            "camera",
+            "192.168.50.68",
+            mac_address="02:00:00:00:00:01",
+        )
+
+        response = client.get("/")
+        api_response = client.get("/api/devices")
+
+    assert response.status_code == 200
+    assert "192.168.50.67" not in response.text
+    assert "38:2c:e5:1d:02:fb" not in response.text
+    assert "192.168.50.68" in response.text
+    assert api_response.json()["counts"]["total"] == 1
+    assert [device["device_id"] for device in api_response.json()["devices"]] == [
+        "visible-device"
+    ]
 
 
 def test_device_detail_returns_monitored_traffic(tmp_path, monkeypatch):
@@ -90,6 +133,32 @@ def test_post_healing_action_queues_request(tmp_path, monkeypatch):
         )
         assert status_response.status_code == 200
         assert status_response.json()["parameters"]["source_ipv4"] == "192.0.2.8"
+
+
+def test_device_detail_shows_attacker_ip_for_healing_action(tmp_path, monkeypatch):
+    client, database = client_for(tmp_path, monkeypatch)
+    with client:
+        database.upsert_device("iot-1", "fingerprint", "camera", "10.42.0.2")
+        database.create_healing_request(
+            "request-1",
+            "NET-03",
+            "iot-1",
+            {"source_ipv4": "192.0.2.8", "ttl_seconds": 300},
+            source="cloud",
+        )
+        database.claim_healing_request()
+        database.complete_healing_request(
+            "request-1",
+            "succeeded",
+            result={"source_ipv4": "192.0.2.8", "blocked": True},
+        )
+
+        page = client.get("/devices/iot-1")
+
+    assert page.status_code == 200
+    assert "Attacker IP" in page.text
+    assert "192.0.2.8" in page.text
+    assert "succeeded" in page.text
 
 
 def test_post_healing_action_requires_token_and_supported_id(tmp_path, monkeypatch):

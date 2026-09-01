@@ -103,6 +103,70 @@ def test_cloud_style_source_block_defaults_to_device_ipv4():
     assert result["ttl_seconds"] == 300
 
 
+def test_protected_device_is_allowed_before_drop_rules_and_cannot_be_targeted():
+    runner = NftRunner()
+    executor = NftablesHealingExecutor(
+        runner,
+        protected_macs=("38:2c:e5:1d:02:fb",),
+    )
+
+    with pytest.raises(HealingActionError, match="protected device"):
+        executor.execute(
+            {
+                "action_id": "SEG-03",
+                "ipv4": "192.168.50.112",
+                "mac_address": "38:2c:e5:1d:02:fb",
+                "connected": 1,
+                "parameters": {},
+            }
+        )
+
+    executor.execute(request("SEG-03"))
+    ruleset = next(
+        input_text
+        for command, input_text in runner.commands
+        if command == ["nft", "-f", "-"]
+    )
+    assert "elements = { 38:2c:e5:1d:02:fb }" in ruleset
+    assert ruleset.index("ether saddr @protected_devices") < ruleset.index(
+        "ip saddr @blocked_sources"
+    )
+
+
+def test_existing_ruleset_inserts_protected_device_exemption():
+    runner = NftRunner()
+
+    def existing_table(command, **kwargs):
+        runner.commands.append((command, kwargs.get("input")))
+        if command[:3] == ["nft", "list", "table"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                "table inet iot_guard { chain forward { ip saddr @blocked_sources drop } }",
+                "",
+            )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    executor = NftablesHealingExecutor(
+        existing_table,
+        protected_macs=("38:2c:e5:1d:02:fb",),
+    )
+    executor.prepare()
+
+    commands = [command for command, _input in runner.commands]
+    assert any(command[:4] == ["nft", "add", "set", "inet"] for command in commands)
+    assert any(
+        command[:4] == ["nft", "add", "element", "inet"]
+        and "38:2c:e5:1d:02:fb" in command[-1]
+        for command in commands
+    )
+    assert any(
+        command[:4] == ["nft", "insert", "rule", "inet"]
+        and "@protected_devices" in command
+        for command in commands
+    )
+
+
 def test_mac_block_and_unblock_are_device_scoped():
     runner = NftRunner()
     executor = NftablesHealingExecutor(runner)
@@ -154,6 +218,22 @@ def test_rate_controls_apply_bidirectional_tc_policing(action_id, rate):
     assert len(filters) == 2
     assert any("src_ip" in command for command in filters)
     assert any("dst_ip" in command for command in filters)
+
+
+def test_rate_controls_pass_protected_source_mac_before_policing():
+    runner = NftRunner()
+    executor = NftablesHealingExecutor(
+        runner,
+        protected_macs=("38:2c:e5:1d:02:fb",),
+    )
+
+    executor.execute(request("NET-01"))
+
+    filters = [command for command, _input in runner.commands if command[:2] == ["tc", "filter"]]
+    protected_filters = [command for command in filters if "src_mac" in command]
+    assert len(protected_filters) == 2
+    assert all("38:2c:e5:1d:02:fb" in command for command in protected_filters)
+    assert all(command[command.index("pref") + 1] == "1" for command in protected_filters)
 
 
 @pytest.mark.parametrize(

@@ -384,6 +384,20 @@ class Database:
         item = dict(row)
         item["parameters"] = json.loads(item.pop("parameters_json"))
         item["result"] = json.loads(item.pop("result_json")) if item["result_json"] else None
+        item["attacker_ip"] = None
+        for key in (
+            "attacker_ip",
+            "attacker_ipv4",
+            "source_ipv4",
+            "source_cidr",
+            "destination_ipv4",
+        ):
+            for details in (item["result"], item["parameters"]):
+                if isinstance(details, dict) and details.get(key):
+                    item["attacker_ip"] = str(details[key])
+                    break
+            if item["attacker_ip"] is not None:
+                break
         return item
 
     def device_healing_requests(self, device_id: str, limit: int = 50) -> list[dict]:

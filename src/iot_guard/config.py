@@ -4,9 +4,15 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from .identity import normalize_mac
+
 
 def _interfaces(value: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+def _mac_addresses(value: str) -> tuple[str, ...]:
+    return tuple(normalize_mac(item) for item in value.split(",") if item.strip())
 
 
 @dataclass(frozen=True)
@@ -16,6 +22,8 @@ class Settings:
     dhcp_lease_file: Path
     identity_secret_file: Path
     capture_interfaces: tuple[str, ...]
+    ignored_device_macs: tuple[str, ...]
+    protected_device_macs: tuple[str, ...]
     hotspot_interface: str
     monitor_interface: str
     hotspot_subnet: str
@@ -48,6 +56,12 @@ class Settings:
             ),
             capture_interfaces=_interfaces(
                 os.getenv("IOT_GUARD_CAPTURE_INTERFACES", "wlan0,wlan1mon")
+            ),
+            ignored_device_macs=_mac_addresses(
+                os.getenv("IOT_GUARD_IGNORED_DEVICE_MACS", "")
+            ),
+            protected_device_macs=_mac_addresses(
+                os.getenv("IOT_GUARD_PROTECTED_DEVICE_MACS", "")
             ),
             hotspot_interface=os.getenv("IOT_GUARD_HOTSPOT_INTERFACE", "wlan0"),
             monitor_interface=os.getenv("IOT_GUARD_MONITOR_INTERFACE", "wlan1mon"),

@@ -55,13 +55,20 @@ class NftablesHealingExecutor:
         self,
         runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
         hotspot_interface: str = "wlan1",
+        protected_macs: tuple[str, ...] = (),
     ) -> None:
         self.runner = runner
         self.hotspot_interface = hotspot_interface
+        self.protected_macs = tuple(self._mac(mac) for mac in protected_macs)
+
+    def prepare(self) -> None:
+        self._ensure_ruleset()
 
     def execute(self, request: dict[str, Any]) -> dict[str, Any]:
         if request["action_id"] == "UNBLOCK":
             return self._unblock(request.get("ipv4"), request.get("mac_address"))
+        if self._is_protected(request.get("mac_address")):
+            raise HealingActionError("Healing actions cannot target a protected device")
         device_ipv4 = self._ipv4(request.get("ipv4"), "Device has no valid leased IPv4 address")
         if not request.get("connected"):
             raise HealingActionError("Device is not currently connected")
@@ -119,6 +126,15 @@ class NftablesHealingExecutor:
             raise HealingActionError("rate_kbit or burst_kb is outside the safe range")
         preference = self._tc_preference(device_ipv4)
         self._run(["tc", "qdisc", "replace", "dev", self.hotspot_interface, "clsact"])
+        for protected_preference, mac_address in enumerate(self.protected_macs, start=1):
+            for direction in ("ingress", "egress"):
+                self._run(
+                    [
+                        "tc", "filter", "replace", "dev", self.hotspot_interface,
+                        direction, "protocol", "ip", "pref", str(protected_preference),
+                        "flower", "src_mac", mac_address, "action", "pass",
+                    ]
+                )
         for direction, address_field in (("ingress", "src_ip"), ("egress", "dst_ip")):
             self._run(
                 [
@@ -349,6 +365,7 @@ class NftablesHealingExecutor:
             check=False,
         )
         if result.returncode == 0:
+            self._ensure_protected_devices(result.stdout)
             additions = {
                 "blocked_devices": (
                     "{ type ether_addr; }",
@@ -400,7 +417,17 @@ class NftablesHealingExecutor:
                         *rule,
                     ])
             return
+        protected_elements = ", ".join(self.protected_macs)
+        protected_rule = (
+            "        ether saddr @protected_devices counter accept\n"
+            if self.protected_macs
+            else ""
+        )
         ruleset = """table inet iot_guard {
+    set protected_devices {
+        type ether_addr
+        elements = { __PROTECTED_ELEMENTS__ }
+    }
     set blocked_sources {
         type ipv4_addr
         flags timeout
@@ -438,7 +465,7 @@ class NftablesHealingExecutor:
     }
     chain forward {
         type filter hook forward priority -10; policy accept;
-        ip saddr @blocked_sources counter drop
+    __PROTECTED_RULE__        ip saddr @blocked_sources counter drop
         ip saddr @isolated_devices counter drop
         ip daddr @isolated_devices counter drop
         ether saddr @blocked_devices counter drop
@@ -452,8 +479,34 @@ class NftablesHealingExecutor:
         ip saddr @blocked_networks counter drop
     }
 }
-"""
+        """
+        ruleset = ruleset.replace("__PROTECTED_ELEMENTS__", protected_elements)
+        ruleset = ruleset.replace("__PROTECTED_RULE__", protected_rule)
         self._run(["nft", "-f", "-"], input_text=ruleset)
+
+    def _ensure_protected_devices(self, ruleset: str) -> None:
+        if "set protected_devices" not in ruleset:
+            self._run(
+                [
+                    "nft", "add", "set", "inet", "iot_guard", "protected_devices",
+                    "{ type ether_addr; }",
+                ]
+            )
+        for mac_address in self.protected_macs:
+            self._run(
+                [
+                    "nft", "add", "element", "inet", "iot_guard", "protected_devices",
+                    f"{{ {mac_address} }}",
+                ],
+                ignore_existing=True,
+            )
+        if self.protected_macs and "ether saddr @protected_devices" not in ruleset:
+            self._run(
+                [
+                    "nft", "insert", "rule", "inet", "iot_guard", "forward",
+                    "ether", "saddr", "@protected_devices", "counter", "accept",
+                ]
+            )
 
     def _run(
         self,
@@ -501,6 +554,14 @@ class NftablesHealingExecutor:
         except (TypeError, ValueError) as exc:
             raise HealingActionError("Device has no valid MAC address") from exc
 
+    def _is_protected(self, value: Any) -> bool:
+        if not isinstance(value, str):
+            return False
+        try:
+            return self._mac(value) in self.protected_macs
+        except HealingActionError:
+            return False
+
     @staticmethod
     def _tc_preference(device_ipv4: str) -> int:
         return 1000 + zlib.crc32(device_ipv4.encode("ascii")) % 60000
@@ -510,6 +571,9 @@ class HealingWorker:
     def __init__(self, database: Database, executor: NftablesHealingExecutor) -> None:
         self.database = database
         self.executor = executor
+
+    def prepare(self) -> None:
+        self.executor.prepare()
 
     def process_one(self) -> bool:
         request = self.database.claim_healing_request()

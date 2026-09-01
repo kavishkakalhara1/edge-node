@@ -4,8 +4,10 @@ import json
 import secrets
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Request, status
@@ -19,9 +21,53 @@ from .database import Database
 from .healing import CLOUD_ACTIONS, SUPPORTED_ACTIONS
 
 PACKAGE_DIR = Path(__file__).parent
+SRI_LANKA_TIMEZONE = ZoneInfo("Asia/Colombo")
 settings = Settings.from_env()
 database = Database(settings.database_path)
 templates = Jinja2Templates(directory=PACKAGE_DIR / "templates")
+
+
+def _sri_lanka_time(value: str) -> datetime:
+    timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    return timestamp.astimezone(SRI_LANKA_TIMEZONE)
+
+
+def sl_datetime(value: str) -> str:
+    return _sri_lanka_time(value).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def sl_time(value: str) -> str:
+    return _sri_lanka_time(value).strftime("%H:%M:%S")
+
+
+templates.env.filters["sl_datetime"] = sl_datetime
+templates.env.filters["sl_time"] = sl_time
+
+
+def dashboard_data() -> dict:
+    data = database.dashboard()
+    ignored_macs = set(settings.ignored_device_macs)
+    if not ignored_macs:
+        return data
+    ignored_ids = {
+        device["device_id"]
+        for device in data["devices"]
+        if device.get("mac_address") in ignored_macs
+    }
+    data["devices"] = [
+        device for device in data["devices"] if device["device_id"] not in ignored_ids
+    ]
+    data["recent"] = [
+        event for event in data["recent"] if event["device_id"] not in ignored_ids
+    ]
+    data["counts"] = {
+        "total": len(data["devices"]),
+        "connected": sum(bool(device["connected"]) for device in data["devices"]),
+        "elevated": sum(device["risk_score"] >= 0.50 for device in data["devices"]),
+    }
+    return data
 
 
 class HealingRequestBody(BaseModel):
@@ -66,7 +112,7 @@ app.mount("/static", StaticFiles(directory=PACKAGE_DIR / "static"), name="static
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
-    data = database.dashboard()
+    data = dashboard_data()
     data["latency"] = latency_benchmark()
     return templates.TemplateResponse(request, "dashboard.html", data)
 
@@ -86,7 +132,7 @@ def device_detail(request: Request, device_id: str):
 
 @app.get("/api/devices")
 def api_devices():
-    return database.dashboard()
+    return dashboard_data()
 
 
 @app.get("/api/devices/{device_id}")

@@ -17,8 +17,8 @@
       <div><span>IPv4</span><strong>{{ device.ipv4 or 'Unknown' }}</strong></div>
       <div><span>MAC address</span><strong>{{ device.mac_address or 'Unknown' }}</strong></div>
       <div><span>Connection</span><strong>{{ 'Online' if device.connected else 'Offline' }}</strong></div>
-      <div><span>First seen</span><strong>{{ device.first_seen[:19]|replace('T', ' ') }}</strong></div>
-      <div><span>Last seen</span><strong>{{ device.last_seen[:19]|replace('T', ' ') }}</strong></div>
+      <div><span>First seen (SLST)</span><strong>{{ device.first_seen|sl_datetime }}</strong></div>
+      <div><span>Last seen (SLST)</span><strong>{{ device.last_seen|sl_datetime }}</strong></div>
     </section>
     <section class="healing-panel">
       <div class="section-heading">
@@ -26,17 +26,18 @@
         <button class="unblock-button" type="button" onclick="unblockDevice()">Unblock device</button>
       </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Time</th><th>Action</th><th>Source</th><th>Status</th><th>Result</th></tr></thead>
+        <thead><tr><th>Time</th><th>Action</th><th>Attacker IP</th><th>Source</th><th>Status</th><th>Result</th></tr></thead>
         <tbody>
         {% for request in healing_requests %}
           <tr>
-            <td>{{ request.requested_at[:19]|replace('T', ' ') }}</td>
+            <td>{{ request.requested_at|sl_datetime }}</td>
             <td>{{ request.action_id }}{% if request.action_id in cloud_actions %}<small>{{ cloud_actions[request.action_id].name }}</small>{% endif %}</td>
+            <td>{{ request.attacker_ip or 'Not provided' }}</td>
             <td>{{ request.source }}</td>
             <td><span class="action-status {{ request.status }}">{{ request.status }}</span></td>
             <td>{{ request.error or ('Applied' if request.status == 'succeeded' else 'Pending') }}</td>
           </tr>
-        {% else %}<tr><td colspan="5" class="empty">No healing actions received.</td></tr>{% endfor %}
+        {% else %}<tr><td colspan="6" class="empty">No healing actions received.</td></tr>{% endfor %}
         </tbody>
       </table></div>
       <p class="action-message" id="action-message" role="status"></p>
@@ -47,12 +48,12 @@
         <div><span>Traffic windows</span><strong>{{ '{:,}'.format(traffic.window_count) }}</strong></div>
         <div><span>Packets observed</span><strong>{{ '{:,}'.format(traffic.packet_count) }}</strong></div>
         <div><span>Bytes observed</span><strong>{{ '{:,}'.format(traffic.byte_count) }}</strong></div>
-        <div><span>Latest window</span><strong>{{ traffic.latest_window[:19]|replace('T', ' ') if traffic.latest_window else 'No traffic' }}</strong></div>
+        <div><span>Latest window</span><strong>{{ traffic.latest_window|sl_datetime if traffic.latest_window else 'No traffic' }}</strong></div>
       </div>
       <div class="section-heading feature-heading">
         <h2>Live model features</h2>
         {% if latest_features %}
-          <span>{{ feature_rows|length }} inputs / {{ latest_features.resolution_seconds }}s window / {{ latest_features.window_start[:19]|replace('T', ' ') }}</span>
+          <span>{{ feature_rows|length }} inputs / {{ latest_features.resolution_seconds }}s window / {{ latest_features.window_start|sl_datetime }} SLST</span>
         {% else %}
           <span>Waiting for captured traffic</span>
         {% endif %}
@@ -73,7 +74,7 @@
         <tbody>
         {% for window in windows %}
           <tr>
-            <td>{{ window.window_start[:19]|replace('T', ' ') }}</td>
+            <td>{{ window.window_start|sl_datetime }}</td>
             <td>{{ window.resolution_seconds }}s</td>
             <td>{{ '{:,}'.format(window.packet_count) }}</td>
             <td>{{ '{:,}'.format(window.byte_count) }}</td>
@@ -91,7 +92,7 @@
         <tbody>
         {% for event in events %}
           <tr class="{{ 'anomaly-row' if event.decision == 'anomaly' else '' }}">
-            <td>{{ event.observed_at[:19]|replace('T', ' ') }}</td><td>{{ event.decision }}</td><td>{{ event.anomaly_type|replace('_', ' ') }}</td>
+            <td>{{ event.observed_at|sl_datetime }}</td><td>{{ event.decision }}</td><td>{{ event.anomaly_type|replace('_', ' ') }}</td>
             <td>{{ '%.2f'|format(event.point_score or 0) }}</td><td>{{ '%.2f'|format(event.temporal_score or 0) }}</td><td>{{ '%.2f'|format(event.ensemble_score or 0) }}</td><td>{{ '%.2f'|format(event.risk_after) }}</td>
           </tr>
         {% else %}<tr><td colspan="7" class="empty">No inference results yet.</td></tr>{% endfor %}

@@ -13,7 +13,7 @@
       <p class="eyebrow">Raspberry Pi 5 · Passive monitor</p>
       <h1>IoT Guard</h1>
     </div>
-    <div class="live"><span></span> Live · refreshes every 10s</div>
+    <div class="live"><span></span> Live · SLST · refreshes every 10s</div>
   </header>
 
   <main>
@@ -72,7 +72,7 @@
           <li>
             <span class="alert-mark {{ event.anomaly_type }}"></span>
             <div><a href="/devices/{{ event.device_id }}">{{ event.hostname or event.device_id }}</a><p>{{ event.anomaly_type|replace('_', ' ') }} · risk {{ '%.2f'|format(event.risk_after) }}</p></div>
-            <time>{{ event.observed_at[11:19] }}</time>
+            <time>{{ event.observed_at|sl_time }}</time>
           </li>
         {% else %}
           <li class="empty">No anomalies recorded.</li>

@@ -90,7 +90,10 @@ class Collector:
         )
         self.healing = HealingWorker(
             self.database,
-            NftablesHealingExecutor(hotspot_interface=settings.hotspot_interface),
+            NftablesHealingExecutor(
+                hotspot_interface=settings.hotspot_interface,
+                protected_macs=settings.protected_device_macs,
+            ),
         )
         self.cloud = CloudReporter(
             settings.cloud_api_endpoint,
@@ -107,6 +110,7 @@ class Collector:
     def start(self) -> None:
         self.database.initialize()
         self.database.reset_daily_risk()
+        self.healing.prepare()
         if not self.settings.dhcp_lease_file.is_file():
             LOGGER.error(
                 "DHCP lease file does not exist: %s; connected devices cannot be discovered",
@@ -154,7 +158,7 @@ class Collector:
                 self.settings.hotspot_interface,
             )
             return
-        active_macs = stations
+        active_macs = stations - set(self.settings.ignored_device_macs)
         now = time.time()
         active_ids = set()
         for lease in leases:
@@ -259,6 +263,7 @@ class Collector:
                 continue
             action_id = str(action.get("action_id", "")).upper()
             device_id = action.get("device_id")
+            parameters = action.get("parameters", {})
             if action_id not in CLOUD_ACTIONS or not isinstance(device_id, str):
                 LOGGER.error(
                     "Ignoring unsupported cloud healing action action=%s device=%r",
@@ -266,6 +271,19 @@ class Collector:
                     device_id,
                 )
                 continue
+            if not isinstance(parameters, dict):
+                LOGGER.error("Ignoring cloud healing action with invalid parameters: %r", action)
+                continue
+            parameters = dict(parameters)
+            for key in (
+                "attacker_ip",
+                "attacker_ipv4",
+                "source_ipv4",
+                "source_cidr",
+                "destination_ipv4",
+            ):
+                if key in action and key not in parameters:
+                    parameters[key] = action[key]
             request_id = uuid.uuid5(
                 uuid.NAMESPACE_URL,
                 f"iot-guard:{observed_at}:{index}:{action_id}:{device_id}",
@@ -274,7 +292,7 @@ class Collector:
                 request_id,
                 action_id,
                 device_id,
-                {},
+                parameters,
                 source="cloud",
             )
             if queued is None:

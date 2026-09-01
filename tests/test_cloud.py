@@ -133,7 +133,17 @@ def test_anomaly_reporting_waits_two_minutes_per_device(monkeypatch):
 def test_cloud_response_queues_supported_healing_action():
     collector = collector_for_reporting()
     collector.cloud = FakeCloud(
-        {"status": "accepted", "actions": [{"action_id": "NET-03", "device_id": "iot-1"}]}
+        {
+            "status": "accepted",
+            "actions": [
+                {
+                    "action_id": "NET-03",
+                    "device_id": "iot-1",
+                    "parameters": {"ttl_seconds": 300},
+                    "attacker_ip": "192.0.2.8",
+                }
+            ],
+        }
     )
 
     collector._store_result(
@@ -154,6 +164,10 @@ def test_cloud_response_queues_supported_healing_action():
     assert queued["action_id"] == "NET-03"
     assert queued["device_id"] == "iot-1"
     assert queued["source"] == "cloud"
+    assert queued["parameters"] == {
+        "ttl_seconds": 300,
+        "attacker_ip": "192.0.2.8",
+    }
 
 
 def test_cloud_response_ignores_unsupported_healing_action():
