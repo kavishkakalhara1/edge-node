@@ -4,11 +4,16 @@ import http.client
 import json
 import logging
 import socket
+import time
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import SplitResult, urlsplit
 
 LOGGER = logging.getLogger(__name__)
+
+_ACCEPTED_FLAGS = frozenset(
+    {"anomaly", "healing_active", "healing_heartbeat", "healing_expired"}
+)
 
 
 def _bound_connection(
@@ -59,6 +64,7 @@ class CloudReporter:
         connection_factory: Callable[
             [SplitResult, str, float], http.client.HTTPConnection
         ] = _bound_connection,
+        recorder: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.endpoint = endpoint.strip()
         self.uplink_interface = uplink_interface.strip()
@@ -66,6 +72,7 @@ class CloudReporter:
         self.timeout_seconds = timeout_seconds
         self._connection_factory = connection_factory
         self._sender = sender or self._post
+        self._recorder = recorder
         if self.endpoint:
             if not self.uplink_interface:
                 raise ValueError("Cloud uplink interface is required when cloud reporting is enabled")
@@ -83,23 +90,77 @@ class CloudReporter:
     def submit(self, payload: dict[str, Any]) -> Any | bool:
         if not self.enabled:
             return False
+        flag = payload.get("flag")
+        device_id = payload.get("device_id")
+        if flag not in _ACCEPTED_FLAGS:
+            LOGGER.warning(
+                "Cloud delivery suppressed for unsupported flag device=%s flag=%s",
+                device_id or "unknown",
+                flag,
+            )
+            self._record(
+                {
+                    "flag": flag,
+                    "device_id": device_id,
+                    "status": "suppressed",
+                    "duration_ms": None,
+                    "error": f"unsupported flag: {flag!r}",
+                    "payload": payload,
+                    "response": None,
+                }
+            )
+            return False
+        started = time.perf_counter()
         try:
             response = self._sender(payload)
         except (OSError, http.client.HTTPException, ValueError) as exc:
+            duration_ms = (time.perf_counter() - started) * 1000
             LOGGER.error(
                 "Cloud delivery failed device=%s flag=%s error=%s",
-                payload["device_id"],
-                payload["flag"],
+                device_id or "unknown",
+                flag,
                 exc,
             )
+            self._record(
+                {
+                    "flag": flag,
+                    "device_id": device_id,
+                    "status": "failed",
+                    "duration_ms": duration_ms,
+                    "error": str(exc),
+                    "payload": payload,
+                    "response": None,
+                }
+            )
             return False
+        duration_ms = (time.perf_counter() - started) * 1000
         LOGGER.info(
             "Cloud delivery succeeded device=%s flag=%s response=%s",
-            payload["device_id"],
-            payload["flag"],
+            device_id or "unknown",
+            flag,
             response,
         )
+        self._record(
+            {
+                "flag": flag,
+                "device_id": device_id,
+                "status": "accepted",
+                "duration_ms": duration_ms,
+                "error": None,
+                "payload": payload,
+                "response": response,
+            }
+        )
         return response if response is not None else {}
+
+    def _record(self, entry: dict[str, Any]) -> None:
+        if self._recorder is None:
+            return
+        entry.setdefault("endpoint", self.endpoint)
+        try:
+            self._recorder(entry)
+        except Exception:
+            LOGGER.exception("Failed to persist cloud delivery record")
 
     def close(self) -> None:
         pass

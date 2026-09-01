@@ -111,13 +111,36 @@
         headers: {"Content-Type": "application/json", "X-IoT-Guard-Token": token},
         body: JSON.stringify({parameters: {reason: "dashboard demonstration reset"}})
       });
-      if (response.ok) {
-        message.textContent = "Unblock queued. The collector will apply it shortly.";
-        window.setTimeout(() => window.location.reload(), 1500);
-      } else {
+      if (!response.ok) {
         const body = await response.json();
         message.textContent = body.detail || "Unable to queue unblock action.";
+        return;
       }
+      const queued = await response.json();
+      message.textContent = "Unblock queued; waiting for the healing worker…";
+      const outcome = await pollHealingStatus(queued.request_id, token);
+      if (outcome === null) {
+        message.textContent = "Unblock queued but the healing worker did not report an outcome yet.";
+      } else if (outcome.status === "succeeded") {
+        message.textContent = "Unblock applied by the healing worker.";
+        window.setTimeout(() => window.location.reload(), 1500);
+      } else {
+        message.textContent = `Unblock failed: ${outcome.error || "unknown error"}`;
+      }
+    }
+
+    async function pollHealingStatus(requestId, token, attempts = 15, delayMs = 1000) {
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+        const response = await fetch(`/api/healing-actions/${encodeURIComponent(requestId)}`, {
+          headers: {"X-IoT-Guard-Token": token},
+          cache: "no-store"
+        });
+        if (!response.ok) continue;
+        const body = await response.json();
+        if (body.status === "succeeded" || body.status === "failed") return body;
+      }
+      return null;
     }
   </script>
 </body>

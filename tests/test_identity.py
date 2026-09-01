@@ -30,6 +30,68 @@ def test_client_to_client_traffic_resolves_both_leases(tmp_path):
     assert len(resolved) == 2
 
 
+def test_routed_client_traffic_resolves_target_by_leased_ipv4(tmp_path):
+    lease_file = tmp_path / "leases"
+    lease_file.write_text(
+        "2000000000 02:00:00:00:00:01 10.42.0.2 attacker *\n"
+        "2000000000 02:00:00:00:00:02 10.42.0.3 camera *\n"
+    )
+    registry = LeaseRegistry(lease_file, DeviceIdentity(b"x" * 32))
+    registry.refresh()
+
+    resolved = registry.resolve_all(
+        "02:00:00:00:00:01",
+        "02:00:00:00:00:00",
+        "10.42.0.2",
+        "10.42.0.3",
+    )
+
+    assert [lease.ipv4 for lease in resolved] == ["10.42.0.2", "10.42.0.3"]
+
+
+def test_configured_device_name_overrides_dhcp_hostname(tmp_path):
+    lease_file = tmp_path / "leases"
+    lease_file.write_text(
+        "2000000000 02:00:00:00:00:01 10.42.0.2 dhcp-camera *\n"
+    )
+    registry_file = tmp_path / "devices.json"
+    registry_file.write_text(
+        '{"devices":[{"mac_address":"02-00-00-00-00-01",'
+        '"name":"Living room camera"}]}'
+    )
+    registry = LeaseRegistry(
+        lease_file,
+        DeviceIdentity(b"x" * 32),
+        registry_file,
+    )
+
+    leases = registry.refresh()
+
+    assert leases[0].hostname == "Living room camera"
+    assert registry.configured_name("02:00:00:00:00:01") == "Living room camera"
+
+
+def test_invalid_device_registry_entries_do_not_stop_lease_discovery(tmp_path):
+    lease_file = tmp_path / "leases"
+    lease_file.write_text(
+        "2000000000 02:00:00:00:00:01 10.42.0.2 dhcp-camera *\n"
+    )
+    registry_file = tmp_path / "devices.json"
+    registry_file.write_text(
+        '{"devices":[{"mac_address":"invalid","name":"Bad"},'
+        '{"mac_address":"02:00:00:00:00:01","name":""}]}'
+    )
+    registry = LeaseRegistry(
+        lease_file,
+        DeviceIdentity(b"x" * 32),
+        registry_file,
+    )
+
+    leases = registry.refresh()
+
+    assert leases[0].hostname == "dhcp-camera"
+
+
 def test_unreadable_lease_file_is_treated_as_empty(tmp_path, monkeypatch):
     lease_file = tmp_path / "leases"
     registry = LeaseRegistry(lease_file, DeviceIdentity(b"x" * 32))

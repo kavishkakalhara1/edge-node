@@ -79,6 +79,20 @@ CREATE TABLE IF NOT EXISTS healing_action_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_healing_requests_status_time
 ON healing_action_requests(status, requested_at);
+CREATE TABLE IF NOT EXISTS cloud_deliveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    flag TEXT NOT NULL,
+    device_id TEXT,
+    endpoint TEXT,
+    status TEXT NOT NULL,
+    duration_ms REAL,
+    error TEXT,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    response_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_cloud_deliveries_time
+ON cloud_deliveries(created_at DESC);
 """
 
 
@@ -142,6 +156,26 @@ class Database:
             if "source" not in healing_columns:
                 connection.execute(
                     "ALTER TABLE healing_action_requests ADD COLUMN source TEXT NOT NULL DEFAULT 'dashboard'"
+                )
+            unique_window_index = connection.execute(
+                """SELECT 1 FROM sqlite_master
+                WHERE type = 'index' AND name = 'idx_windows_device_bucket'"""
+            ).fetchone()
+            if unique_window_index is None:
+                connection.execute(
+                    """WITH ranked AS (
+                        SELECT id, ROW_NUMBER() OVER (
+                            PARTITION BY device_id, window_start, resolution_seconds
+                            ORDER BY packet_count DESC, byte_count DESC, id DESC
+                        ) AS duplicate_rank
+                        FROM traffic_windows
+                    )
+                    DELETE FROM traffic_windows
+                    WHERE id IN (SELECT id FROM ranked WHERE duplicate_rank > 1)"""
+                )
+                connection.execute(
+                    """CREATE UNIQUE INDEX idx_windows_device_bucket
+                    ON traffic_windows(device_id, window_start, resolution_seconds)"""
                 )
             connection.commit()
             self._migrate_device_ids(connection)
@@ -292,7 +326,7 @@ class Database:
     ) -> None:
         with self.connect() as connection:
             connection.execute(
-                """INSERT INTO traffic_windows(
+                """INSERT OR IGNORE INTO traffic_windows(
                     device_id, window_start, resolution_seconds, packet_count, byte_count,
                     features_json
                 ) VALUES (?, ?, ?, ?, ?, ?)""",
@@ -312,6 +346,53 @@ class Database:
                 "INSERT INTO service_logs(created_at, level, component, message, details_json) VALUES (?, ?, ?, ?, ?)",
                 (utc_now(), level, component, message, json.dumps(details or {})),
             )
+
+    def record_cloud_delivery(self, entry: dict) -> None:
+        payload = entry.get("payload") or {}
+        response = entry.get("response")
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO cloud_deliveries(
+                    created_at, flag, device_id, endpoint, status,
+                    duration_ms, error, payload_json, response_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    utc_now(),
+                    str(entry.get("flag") or ""),
+                    entry.get("device_id"),
+                    entry.get("endpoint"),
+                    str(entry.get("status") or ""),
+                    entry.get("duration_ms"),
+                    entry.get("error"),
+                    json.dumps(payload, default=str),
+                    None if response is None else json.dumps(response, default=str),
+                ),
+            )
+
+    def cloud_deliveries(self, limit: int = 50) -> list[dict]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM cloud_deliveries ORDER BY id DESC LIMIT ?",
+                (int(limit),),
+            ).fetchall()
+        return [self._cloud_delivery_dict(row) for row in rows]
+
+    @staticmethod
+    def _cloud_delivery_dict(row: sqlite3.Row) -> dict:
+        item = dict(row)
+        try:
+            item["payload"] = json.loads(item.pop("payload_json") or "{}")
+        except json.JSONDecodeError:
+            item["payload"] = {}
+        response_raw = item.pop("response_json", None)
+        if response_raw is None:
+            item["response"] = None
+        else:
+            try:
+                item["response"] = json.loads(response_raw)
+            except json.JSONDecodeError:
+                item["response"] = response_raw
+        return item
 
     def create_healing_request(
         self,
@@ -473,7 +554,28 @@ class Database:
                     JOIN devices d USING(device_id) WHERE e.decision = 'anomaly'
                     ORDER BY e.observed_at DESC LIMIT 50"""
             )]
-        return {"devices": devices, "counts": counts, "recent": recent}
+            wireless = []
+            for row in connection.execute(
+                """SELECT created_at, message, details_json FROM service_logs
+                WHERE component = 'wireless' ORDER BY created_at DESC LIMIT 25"""
+            ):
+                alert = dict(row)
+                alert["details"] = json.loads(alert.pop("details_json"))
+                wireless.append(alert)
+            cloud_deliveries = [
+                self._cloud_delivery_dict(row)
+                for row in connection.execute(
+                    """SELECT * FROM cloud_deliveries
+                    ORDER BY id DESC LIMIT 50"""
+                )
+            ]
+        return {
+            "devices": devices,
+            "counts": counts,
+            "recent": recent,
+            "wireless_alerts": wireless,
+            "cloud_deliveries": cloud_deliveries,
+        }
 
     def device_detail(self, device_id: str) -> dict | None:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
@@ -504,8 +606,12 @@ class Database:
                     COALESCE(SUM(packet_count), 0) AS packet_count,
                     COALESCE(SUM(byte_count), 0) AS byte_count,
                     MAX(window_start) AS latest_window
-                FROM traffic_windows WHERE device_id = ? AND window_start >= ?""",
-                (device_id, cutoff),
+                FROM traffic_windows
+                WHERE device_id = ? AND window_start >= ?
+                  AND resolution_seconds = (
+                      SELECT MIN(resolution_seconds) FROM traffic_windows WHERE device_id = ?
+                  )""",
+                (device_id, cutoff, device_id),
             ).fetchone())
         for window in windows:
             resolution = max(int(window["resolution_seconds"]), 1)
@@ -552,11 +658,28 @@ class Database:
             )
         return cursor.rowcount
 
+    def reset(self) -> dict[str, int]:
+        tables = (
+            "healing_action_requests",
+            "anomaly_events",
+            "traffic_windows",
+            "service_logs",
+            "cloud_deliveries",
+            "devices",
+        )
+        deleted: dict[str, int] = {}
+        with self.connect() as connection:
+            for table in tables:
+                cursor = connection.execute(f"DELETE FROM {table}")
+                deleted[table] = cursor.rowcount
+        return deleted
+
     def cleanup(self, retention_days: int) -> None:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
         with self.connect() as connection:
             connection.execute("DELETE FROM traffic_windows WHERE window_start < ?", (cutoff,))
             connection.execute("DELETE FROM anomaly_events WHERE observed_at < ?", (cutoff,))
             connection.execute("DELETE FROM service_logs WHERE created_at < ?", (cutoff,))
+            connection.execute("DELETE FROM cloud_deliveries WHERE created_at < ?", (cutoff,))
         with self.connect() as connection:
             connection.execute("PRAGMA wal_checkpoint(PASSIVE)")

@@ -82,7 +82,10 @@ class NftablesHealingExecutor:
         if request["action_id"] == "NET-04":
             return self._port_block(device_ipv4, request["parameters"])
         if request["action_id"] == "NET-05":
-            return self._timed_set("scan_filtered", device_ipv4, request["parameters"], 300)
+            result = self._timed_set(
+                "scan_filtered", device_ipv4, request["parameters"], 300
+            )
+            return result | {"filtered": True}
         if request["action_id"] == "NET-06":
             return self._egress_block(device_ipv4, request["parameters"])
         if request["action_id"] == "NET-07":
@@ -304,7 +307,37 @@ class NftablesHealingExecutor:
                 ignore_missing=True,
             )
             removed.append(f"blocked_devices:{normalized_mac}")
+        if device_ipv4:
+            removed.extend(self._remove_matching_networks(device_ipv4))
         return {"unblocked": True, "removed": removed}
+
+    def _remove_matching_networks(self, device_ipv4: str) -> list[str]:
+        result = self.runner(
+            ["nft", "list", "set", "inet", "iot_guard", "blocked_networks"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        try:
+            address = ipaddress.IPv4Address(device_ipv4)
+        except ValueError:
+            return []
+        removed: list[str] = []
+        for candidate in re.findall(r"\d+\.\d+\.\d+\.\d+/\d+", result.stdout):
+            try:
+                network = ipaddress.IPv4Network(candidate, strict=False)
+            except ValueError:
+                continue
+            if address in network:
+                self._run(
+                    ["nft", "delete", "element", "inet", "iot_guard", "blocked_networks",
+                     f"{{ {candidate} }}"],
+                    ignore_missing=True,
+                )
+                removed.append(f"blocked_networks:{candidate}")
+        return removed
 
     def _remove_device_pairs(self, set_name: str, device_ipv4: str) -> list[str]:
         result = self.runner(
@@ -380,7 +413,7 @@ class NftablesHealingExecutor:
                 ),
                 "scan_filtered": (
                     "{ type ipv4_addr; flags timeout; }",
-                    (("ip", "saddr", "@scan_filtered", "counter", "drop"),),
+                    (),
                 ),
                 "progressive_bans": (
                     "{ type ipv4_addr; flags timeout; }",
@@ -416,6 +449,7 @@ class NftablesHealingExecutor:
                         "nft", "add", "rule", "inet", "iot_guard", "forward",
                         *rule,
                     ])
+            self._ensure_scan_filter_rules()
             return
         protected_elements = ", ".join(self.protected_macs)
         protected_rule = (
@@ -471,7 +505,11 @@ class NftablesHealingExecutor:
         ether saddr @blocked_devices counter drop
         ether daddr @blocked_devices counter drop
         ip saddr @flood_hardened counter drop
-        ip saddr @scan_filtered counter drop
+        ip saddr @scan_filtered tcp flags & (fin|syn|rst|psh|ack|urg) == 0 counter drop comment "iot-guard-scan-null"
+        ip saddr @scan_filtered tcp flags & (fin|syn|rst|psh|ack|urg) == fin counter drop comment "iot-guard-scan-fin"
+        ip saddr @scan_filtered tcp flags & (fin|syn|rst|psh|ack|urg) == fin|psh|urg counter drop comment "iot-guard-scan-xmas"
+        ip saddr @scan_filtered tcp flags syn ct state new limit rate over 20/second counter drop comment "iot-guard-scan-syn-rate"
+        ip saddr @scan_filtered icmp type echo-request limit rate over 5/second counter drop comment "iot-guard-scan-icmp-rate"
         ip saddr @progressive_bans counter drop
         ip saddr . tcp dport @blocked_tcp_ports counter drop
         ip saddr . udp dport @blocked_udp_ports counter drop
@@ -483,6 +521,63 @@ class NftablesHealingExecutor:
         ruleset = ruleset.replace("__PROTECTED_ELEMENTS__", protected_elements)
         ruleset = ruleset.replace("__PROTECTED_RULE__", protected_rule)
         self._run(["nft", "-f", "-"], input_text=ruleset)
+
+    def _ensure_scan_filter_rules(self) -> None:
+        result = self.runner(
+            ["nft", "-a", "list", "chain", "inet", "iot_guard", "forward"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise HealingActionError("Unable to inspect nftables scan-filter rules")
+        for line in result.stdout.splitlines():
+            if (
+                "ip saddr @scan_filtered" in line
+                and 'comment "iot-guard-scan-' not in line
+                and " drop" in line
+            ):
+                handle = re.search(r"# handle (\d+)", line)
+                if handle is not None:
+                    self._run(
+                        [
+                            "nft", "delete", "rule", "inet", "iot_guard", "forward",
+                            "handle", handle.group(1),
+                        ]
+                    )
+        rules = (
+            (
+                "tcp", "flags", "&", "(fin|syn|rst|psh|ack|urg)", "==", "0",
+                "counter", "drop", "comment", "iot-guard-scan-null",
+            ),
+            (
+                "tcp", "flags", "&", "(fin|syn|rst|psh|ack|urg)", "==", "fin",
+                "counter", "drop", "comment", "iot-guard-scan-fin",
+            ),
+            (
+                "tcp", "flags", "&", "(fin|syn|rst|psh|ack|urg)", "==",
+                "fin|psh|urg", "counter", "drop", "comment", "iot-guard-scan-xmas",
+            ),
+            (
+                "tcp", "flags", "syn", "ct", "state", "new", "limit", "rate",
+                "over", "20/second", "counter", "drop", "comment",
+                "iot-guard-scan-syn-rate",
+            ),
+            (
+                "icmp", "type", "echo-request", "limit", "rate", "over", "5/second",
+                "counter", "drop", "comment", "iot-guard-scan-icmp-rate",
+            ),
+        )
+        for rule in rules:
+            marker = rule[-1]
+            if marker in result.stdout:
+                continue
+            self._run(
+                [
+                    "nft", "add", "rule", "inet", "iot_guard", "forward",
+                    "ip", "saddr", "@scan_filtered", *rule,
+                ]
+            )
 
     def _ensure_protected_devices(self, ruleset: str) -> None:
         if "set protected_devices" not in ruleset:
@@ -568,9 +663,16 @@ class NftablesHealingExecutor:
 
 
 class HealingWorker:
-    def __init__(self, database: Database, executor: NftablesHealingExecutor) -> None:
+    def __init__(
+        self,
+        database: Database,
+        executor: NftablesHealingExecutor,
+        completion_listener: Callable[[dict[str, Any], dict[str, Any] | None, str | None], None]
+        | None = None,
+    ) -> None:
         self.database = database
         self.executor = executor
+        self.completion_listener = completion_listener
 
     def prepare(self) -> None:
         self.executor.prepare()
@@ -579,11 +681,14 @@ class HealingWorker:
         request = self.database.claim_healing_request()
         if request is None:
             return False
+        result: dict[str, Any] | None = None
+        error: str | None = None
         try:
             result = self.executor.execute(request)
         except HealingActionError as exc:
+            error = str(exc)
             self.database.complete_healing_request(
-                request["request_id"], "failed", error=str(exc)
+                request["request_id"], "failed", error=error
             )
         else:
             if request["action_id"] == "ESC-03":
@@ -593,4 +698,9 @@ class HealingWorker:
             self.database.complete_healing_request(
                 request["request_id"], "succeeded", result=result
             )
+        if self.completion_listener is not None:
+            try:
+                self.completion_listener(request, result, error)
+            except Exception:
+                LOGGER.exception("Healing completion listener failed")
         return True

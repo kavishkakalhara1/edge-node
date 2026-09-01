@@ -105,6 +105,9 @@ def check(settings: Settings) -> None:
         "dhcp_lease_file": str(settings.dhcp_lease_file),
         "dhcp_lease_file_present": settings.dhcp_lease_file.is_file(),
         "dhcp_lease_file_readable": os.access(settings.dhcp_lease_file, os.R_OK),
+        "device_registry": str(settings.device_registry_path),
+        "device_registry_present": settings.device_registry_path.is_file(),
+        "device_registry_readable": os.access(settings.device_registry_path, os.R_OK),
         "network_roles": {
             "iot_hotspot": settings.hotspot_interface,
             "cloud_uplink": settings.cloud_uplink_interface,

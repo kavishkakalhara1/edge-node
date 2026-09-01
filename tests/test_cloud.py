@@ -107,6 +107,14 @@ def test_benign_result_is_not_posted():
     assert collector.cloud.payloads == []
 
 
+def test_cloud_reporter_suppresses_non_anomaly_payload():
+    sender = Mock()
+    reporter = CloudReporter("https://cloud.example/report", "eth0", sender=sender)
+
+    assert reporter.submit({"flag": "normal", "device_id": "iot-1"}) is False
+    sender.assert_not_called()
+
+
 def test_anomaly_reporting_waits_two_minutes_per_device(monkeypatch):
     collector = collector_for_reporting()
     now = 0.0
@@ -132,6 +140,29 @@ def test_anomaly_reporting_waits_two_minutes_per_device(monkeypatch):
         "iot-2",
         "iot-1",
     ]
+
+
+def test_failed_cloud_delivery_obeys_report_interval(monkeypatch):
+    collector = collector_for_reporting()
+    collector.cloud = FakeCloud(False)
+    now = 0.0
+    monkeypatch.setattr("iot_guard.collector.time.monotonic", lambda: now)
+    result = {
+        "point_score": 2.0,
+        "temporal_score": None,
+        "ensemble_score": 2.0,
+        "is_anomaly": True,
+        "anomaly_type": "point",
+        "decision": "anomaly",
+    }
+
+    collector._store_result("iot-1", "first", result, {})
+    now = 2.0
+    collector._store_result("iot-1", "suppressed", result, {})
+    now = 120.0
+    collector._store_result("iot-1", "retry", result, {})
+
+    assert len(collector.cloud.payloads) == 2
 
 
 def test_cloud_response_queues_supported_healing_action():
@@ -328,3 +359,200 @@ def test_cloud_uplink_cannot_reuse_iot_hotspot(monkeypatch):
     monkeypatch.setenv("IOT_GUARD_HOTSPOT_INTERFACE", "wlan0")
     with pytest.raises(ValueError, match="different interfaces"):
         Settings.from_env()
+
+
+def collector_for_healing():
+    collector = collector_for_reporting()
+    collector.active_healings = {}
+    collector.healing_auto_unblock_seconds = 60.0
+    collector.healing_heartbeat_interval_seconds = 30.0
+    return collector
+
+
+def test_reversible_healing_action_posts_and_resets_throttle(monkeypatch):
+    collector = collector_for_healing()
+    monkeypatch.setattr("iot_guard.collector.time.monotonic", lambda: 100.0)
+    collector.next_anomaly_report_at["iot-1"] = 500.0
+
+    collector._on_healing_completed(
+        {
+            "request_id": "r1",
+            "action_id": "NET-05",
+            "device_id": "iot-1",
+            "ipv4": "10.42.0.5",
+            "mac_address": "02:00:00:00:00:01",
+            "parameters": {"ttl_seconds": 300},
+            "source": "dashboard",
+        },
+        {"device_ipv4": "10.42.0.5", "filtered": True},
+        None,
+    )
+
+    assert "iot-1" not in collector.next_anomaly_report_at
+    active = collector.active_healings["iot-1"]
+    assert active["action_id"] == "NET-05"
+    assert active["unblock_at"] == 160.0
+    payload = collector.cloud.payloads[-1]
+    assert payload["flag"] == "healing_active"
+    assert payload["action_id"] == "NET-05"
+    assert payload["auto_unblock_in_seconds"] == 60.0
+
+
+def test_failed_healing_action_is_not_tracked():
+    collector = collector_for_healing()
+    collector._on_healing_completed(
+        {
+            "action_id": "NET-05",
+            "device_id": "iot-1",
+            "ipv4": "10.42.0.5",
+            "parameters": {},
+        },
+        None,
+        "Device is not currently connected",
+    )
+    assert collector.active_healings == {}
+    assert collector.cloud.payloads == []
+
+
+def test_unblock_completion_clears_state_and_notifies_cloud():
+    collector = collector_for_healing()
+    collector.active_healings["iot-1"] = {
+        "action_id": "NET-05",
+        "device_id": "iot-1",
+        "ipv4": "10.42.0.5",
+        "mac_address": "02:00:00:00:00:01",
+        "parameters": {},
+        "source": "dashboard",
+        "started_at": 0.0,
+        "unblock_at": 60.0,
+        "next_heartbeat_at": 30.0,
+        "unblock_queued": True,
+    }
+    collector.next_anomaly_report_at["iot-1"] = 999.0
+
+    collector._on_healing_completed(
+        {
+            "action_id": "UNBLOCK",
+            "device_id": "iot-1",
+            "source": "auto",
+        },
+        {"unblocked": True, "removed": []},
+        None,
+    )
+
+    assert collector.active_healings == {}
+    assert "iot-1" not in collector.next_anomaly_report_at
+    payload = collector.cloud.payloads[-1]
+    assert payload["flag"] == "healing_expired"
+    assert payload["action_id"] == "NET-05"
+    assert payload["trigger"] == "auto"
+
+
+def test_maintain_healings_enqueues_auto_unblock_after_60s(monkeypatch):
+    collector = collector_for_healing()
+    now = 0.0
+    monkeypatch.setattr("iot_guard.collector.time.monotonic", lambda: now)
+
+    collector._on_healing_completed(
+        {
+            "action_id": "NET-05",
+            "device_id": "iot-1",
+            "ipv4": "10.42.0.5",
+            "mac_address": "02:00:00:00:00:01",
+            "parameters": {},
+            "source": "dashboard",
+        },
+        {"filtered": True},
+        None,
+    )
+    # Prior to the deadline nothing should be queued.
+    now = 59.0
+    collector._maintain_healings()
+    assert not any(
+        entry.get("action_id") == "UNBLOCK"
+        for entry in collector.database.recorded
+    )
+
+    now = 60.0
+    collector._maintain_healings()
+    unblock = [
+        entry for entry in collector.database.recorded if entry.get("action_id") == "UNBLOCK"
+    ]
+    assert len(unblock) == 1
+    assert unblock[0]["device_id"] == "iot-1"
+    assert unblock[0]["source"] == "auto"
+    assert collector.active_healings["iot-1"]["unblock_queued"] is True
+
+    # Second sweep must not re-enqueue.
+    collector._maintain_healings()
+    unblock = [
+        entry for entry in collector.database.recorded if entry.get("action_id") == "UNBLOCK"
+    ]
+    assert len(unblock) == 1
+
+
+def test_maintain_healings_emits_periodic_heartbeat(monkeypatch):
+    collector = collector_for_healing()
+    now = 0.0
+    monkeypatch.setattr("iot_guard.collector.time.monotonic", lambda: now)
+
+    collector._on_healing_completed(
+        {
+            "action_id": "NET-05",
+            "device_id": "iot-1",
+            "ipv4": "10.42.0.5",
+            "mac_address": "02:00:00:00:00:01",
+            "parameters": {},
+            "source": "dashboard",
+        },
+        {"filtered": True},
+        None,
+    )
+    initial = len(collector.cloud.payloads)
+    now = 29.0
+    collector._maintain_healings()
+    assert len(collector.cloud.payloads) == initial
+
+    now = 30.0
+    collector._maintain_healings()
+    heartbeat = collector.cloud.payloads[-1]
+    assert heartbeat["flag"] == "healing_heartbeat"
+    assert heartbeat["device_id"] == "iot-1"
+    assert heartbeat["action_id"] == "NET-05"
+    assert heartbeat["elapsed_seconds"] == 30.0
+    assert heartbeat["remaining_seconds"] == 30.0
+
+
+def test_cloud_reporter_accepts_healing_flags():
+    sender = Mock(return_value={"ok": True})
+    reporter = CloudReporter("https://cloud.example/report", "eth0", sender=sender)
+    for flag in ("healing_active", "healing_heartbeat", "healing_expired"):
+        assert reporter.submit({"flag": flag, "device_id": "iot-1"})
+    assert sender.call_count == 3
+
+
+def test_cloud_reporter_records_each_delivery():
+    entries = []
+
+    def sender(payload):
+        if payload["flag"] == "healing_heartbeat":
+            raise OSError("connection refused")
+        return {"accepted": True}
+
+    reporter = CloudReporter(
+        "https://cloud.example/report",
+        "eth0",
+        sender=sender,
+        recorder=entries.append,
+    )
+    reporter.submit({"flag": "anomaly", "device_id": "iot-1"})
+    reporter.submit({"flag": "healing_heartbeat", "device_id": "iot-1"})
+    reporter.submit({"flag": "normal", "device_id": "iot-1"})
+
+    assert [entry["status"] for entry in entries] == ["accepted", "failed", "suppressed"]
+    assert entries[0]["response"] == {"accepted": True}
+    assert entries[0]["endpoint"] == "https://cloud.example/report"
+    assert entries[0]["duration_ms"] is not None
+    assert entries[1]["error"] == "connection refused"
+    assert entries[2]["duration_ms"] is None
+    assert entries[2]["error"].startswith("unsupported flag")

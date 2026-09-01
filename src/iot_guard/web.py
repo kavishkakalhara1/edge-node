@@ -74,6 +74,10 @@ class HealingRequestBody(BaseModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
 
 
+class AdminResetBody(BaseModel):
+    confirmation: str
+
+
 def require_healing_token(x_iot_guard_token: str | None = Header(default=None)) -> None:
     if not settings.healing_api_token:
         raise HTTPException(status_code=503, detail="Healing API is not configured")
@@ -143,6 +147,13 @@ def api_device(device_id: str):
     return data
 
 
+@app.get("/api/cloud-deliveries")
+def api_cloud_deliveries(limit: int = 50):
+    if limit < 1 or limit > 500:
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
+    return {"deliveries": database.cloud_deliveries(limit=limit)}
+
+
 @app.post(
     "/api/devices/{device_id}/healing-actions/{action_id}",
     status_code=status.HTTP_202_ACCEPTED,
@@ -180,6 +191,17 @@ def healing_action_status(
     if request is None:
         raise HTTPException(status_code=404, detail="Healing action request not found")
     return request
+
+
+@app.post("/api/admin/reset-database")
+def reset_database(
+    body: AdminResetBody,
+    x_iot_guard_token: str | None = Header(default=None),
+):
+    require_healing_token(x_iot_guard_token)
+    if body.confirmation != "RESET":
+        raise HTTPException(status_code=422, detail="Confirmation must be RESET")
+    return {"reset": True, "deleted": database.reset()}
 
 
 @app.get("/health")

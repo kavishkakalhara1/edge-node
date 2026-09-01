@@ -121,6 +121,25 @@ def test_database_returns_latest_captured_features(tmp_path):
     assert latest["values"] == features
 
 
+def test_initialize_deduplicates_traffic_windows_and_enforces_unique_buckets(tmp_path):
+    database = Database(tmp_path / "guard.db")
+    database.initialize()
+    database.upsert_device("iot-1", "fingerprint", "camera", "10.42.0.2")
+    observed_at = datetime.now(UTC).isoformat()
+    with database.connect() as connection:
+        connection.execute("DROP INDEX idx_windows_device_bucket")
+    database.record_window("iot-1", observed_at, 2, 3, 300)
+    database.record_window("iot-1", observed_at, 2, 5, 500)
+
+    database.initialize()
+    database.record_window("iot-1", observed_at, 2, 4, 400)
+
+    windows = database.device_detail("iot-1")["windows"]
+    assert len(windows) == 1
+    assert windows[0]["packet_count"] == 5
+    assert windows[0]["byte_count"] == 500
+
+
 def test_report_risk_formula_and_repeat_counter():
     now = datetime.now(UTC)
     risk = update_risk(

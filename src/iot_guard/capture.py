@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import OrderedDict
+from dataclasses import dataclass
 from typing import Callable
 
 from .features import PacketObservation
@@ -12,10 +13,28 @@ from .leases import LeaseRegistry
 LOGGER = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class WirelessObservation:
+    timestamp: float
+    frame_type: int
+    frame_subtype: int
+    src_mac: str | None
+    dst_mac: str | None
+    bssid: str | None
+    ssid: str | None
+    signal_dbm: int | None
+    channel_frequency: int | None
+    protected: bool
+
+
 class PacketParser:
     def parse(self, packet) -> PacketObservation | None:
         from scapy.layers.inet import IP, TCP, UDP
         from scapy.layers.l2 import Ether
+        from scapy.layers.dot11 import Dot11
+
+        if packet.haslayer(Dot11):
+            return None
 
         if not packet.haslayer(Ether):
             try:
@@ -63,6 +82,52 @@ class PacketParser:
         )
 
 
+class WirelessParser:
+    def parse(self, packet) -> WirelessObservation | None:
+        from scapy.layers.dot11 import Dot11, Dot11Beacon, Dot11Elt, RadioTap
+
+        if not packet.haslayer(Dot11):
+            return None
+        frame = packet[Dot11]
+        ssid = None
+        if packet.haslayer(Dot11Beacon):
+            element = packet.getlayer(Dot11Elt)
+            while element is not None:
+                if element.ID == 0:
+                    ssid = bytes(element.info).decode("utf-8", errors="replace")
+                    break
+                element = element.payload.getlayer(Dot11Elt)
+        radio = packet[RadioTap] if packet.haslayer(RadioTap) else None
+        return WirelessObservation(
+            timestamp=float(getattr(packet, "time", time.time())),
+            frame_type=int(frame.type),
+            frame_subtype=int(frame.subtype),
+            src_mac=self._mac(frame.addr2),
+            dst_mac=self._mac(frame.addr1),
+            bssid=self._mac(frame.addr3),
+            ssid=ssid,
+            signal_dbm=self._integer(getattr(radio, "dBm_AntSignal", None)),
+            channel_frequency=self._integer(getattr(radio, "ChannelFrequency", None)),
+            protected=bool(int(frame.FCfield) & 0x40),
+        )
+
+    @staticmethod
+    def _mac(value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            return normalize_mac(value)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _integer(value) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+
 class DuplicateFilter:
     def __init__(self, max_entries: int = 20_000, ttl_seconds: float = 0.5):
         self.max_entries = max_entries
@@ -93,11 +158,14 @@ class CaptureService:
         interfaces: tuple[str, ...],
         leases: LeaseRegistry,
         callback: Callable[[str, PacketObservation], None],
+        wireless_callback: Callable[[WirelessObservation], None] | None = None,
     ):
         self.interfaces = interfaces
         self.leases = leases
         self.callback = callback
+        self.wireless_callback = wireless_callback
         self.parser = PacketParser()
+        self.wireless_parser = WirelessParser()
         self.duplicates = DuplicateFilter()
         self.sniffers = []
 
@@ -123,10 +191,20 @@ class CaptureService:
 
     def _handle(self, interface: str, packet) -> None:
         try:
+            wireless = self.wireless_parser.parse(packet)
+            if wireless is not None:
+                if self.wireless_callback is not None:
+                    self.wireless_callback(wireless)
+                return
             observation = self.parser.parse(packet)
             if observation is None or not self.duplicates.accepts(observation):
                 return
-            for lease in self.leases.resolve_all(observation.src_mac, observation.dst_mac):
+            for lease in self.leases.resolve_all(
+                observation.src_mac,
+                observation.dst_mac,
+                observation.src_ip,
+                observation.dst_ip,
+            ):
                 self.callback(lease.device_id, observation)
         except Exception:
             LOGGER.exception("Packet processing failed on %s", interface)

@@ -9,17 +9,19 @@ import uuid
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 
-from .capture import CaptureService
+from .capture import CaptureService, WirelessObservation
 from .cloud import CloudReporter
 from .config import Settings
 from .database import Database
 from .features import FeatureEngine, PacketObservation, WindowRecord
 from .healing import CLOUD_ACTIONS, HealingWorker, NftablesHealingExecutor
-from .identity import DeviceIdentity
+from .identity import DeviceIdentity, normalize_mac
 from .leases import LeaseRegistry, associated_macs
 from .model import ProductionEnsemble
 from .risk import update_risk
+from .wireless import WirelessAttackDetector
 
 LOGGER = logging.getLogger(__name__)
 
@@ -74,7 +76,11 @@ class Collector:
         self.settings = settings
         self.database = Database(settings.database_path)
         self.identity = DeviceIdentity.from_file(settings.identity_secret_file)
-        self.leases = LeaseRegistry(settings.dhcp_lease_file, self.identity)
+        self.leases = LeaseRegistry(
+            settings.dhcp_lease_file,
+            self.identity,
+            settings.device_registry_path,
+        )
         self.model = ProductionEnsemble(
             settings.artifact_dir,
             cpu_threads=settings.model_cpu_threads,
@@ -86,7 +92,14 @@ class Collector:
         )
         self.features = FeatureEngine(self._window_ready)
         self.capture = CaptureService(
-            settings.capture_interfaces, self.leases, self._packet_ready
+            settings.capture_interfaces,
+            self.leases,
+            self._packet_ready,
+            self._wireless_ready,
+        )
+        self.wireless = WirelessAttackDetector(
+            settings.hotspot_ssid,
+            self._interface_mac(settings.hotspot_interface),
         )
         self.healing = HealingWorker(
             self.database,
@@ -94,15 +107,20 @@ class Collector:
                 hotspot_interface=settings.hotspot_interface,
                 protected_macs=settings.protected_device_macs,
             ),
+            completion_listener=self._on_healing_completed,
         )
         self.cloud = CloudReporter(
             settings.cloud_api_endpoint,
             settings.cloud_uplink_interface,
             token=settings.cloud_api_token,
             timeout_seconds=settings.cloud_api_timeout_seconds,
+            recorder=self.database.record_cloud_delivery,
         )
         self.next_anomaly_report_at: dict[str, float] = {}
         self.anomaly_report_interval_seconds = settings.cloud_anomaly_interval_seconds
+        self.active_healings: dict[str, dict] = {}
+        self.healing_auto_unblock_seconds = settings.healing_auto_unblock_seconds
+        self.healing_heartbeat_interval_seconds = settings.healing_heartbeat_interval_seconds
         self.stop_event = threading.Event()
         self.last_cleanup = 0.0
         self.risk_date = datetime.now(timezone.utc).date()
@@ -131,12 +149,13 @@ class Collector:
                 if current_date != self.risk_date:
                     self.database.reset_daily_risk()
                     self.risk_date = current_date
+                self.refresh_devices()
                 self.features.tick(now)
                 self.windows.clear_stale(now)
-                self.refresh_devices()
                 for _ in range(10):
                     if not self.healing.process_one():
                         break
+                self._maintain_healings()
                 if now - self.last_cleanup >= 3600:
                     self.database.cleanup(self.settings.retention_days)
                     self.last_cleanup = now
@@ -179,7 +198,7 @@ class Collector:
             self.database.upsert_device(
                 device_id,
                 self.identity.mac_fingerprint(mac),
-                None,
+                self.leases.configured_name(mac),
                 None,
                 mac_address=mac,
             )
@@ -192,6 +211,29 @@ class Collector:
 
     def _packet_ready(self, device_id: str, packet: PacketObservation) -> None:
         self.features.ingest(device_id, packet)
+
+    def _wireless_ready(self, observation: WirelessObservation) -> None:
+        for alert in self.wireless.observe(observation):
+            self.database.log(
+                "warning",
+                "wireless",
+                f"Wireless attack detected: {alert['attack_class']}",
+                alert,
+            )
+            LOGGER.warning(
+                "Wireless attack class=%s source=%s target=%s",
+                alert["attack_class"],
+                alert["source_mac"],
+                alert["target_mac"],
+            )
+
+    @staticmethod
+    def _interface_mac(interface: str) -> str | None:
+        try:
+            value = Path(f"/sys/class/net/{interface}/address").read_text().strip()
+            return normalize_mac(value)
+        except (FileNotFoundError, OSError, ValueError):
+            return None
 
     def _ratios(self, result: dict) -> dict:
         enriched = {
@@ -242,10 +284,10 @@ class Collector:
                 if attack_context is not None:
                     payload["attack_context"] = attack_context
                 response = self.cloud.submit(payload)
+                self.next_anomaly_report_at[device_id] = (
+                    time.monotonic() + self.anomaly_report_interval_seconds
+                )
                 if response is not False:
-                    self.next_anomaly_report_at[device_id] = (
-                        time.monotonic() + self.anomaly_report_interval_seconds
-                    )
                     self._queue_cloud_actions(response, observed_at, attack_context)
             LOGGER.warning(
                 "Anomaly device=%s type=%s risk=%.1f",
@@ -359,6 +401,112 @@ class Collector:
         return identity is not None and device_id in {
             identity.device_id(mac) for mac in protected_macs
         }
+
+    def _on_healing_completed(
+        self,
+        request: dict,
+        result: dict | None,
+        error: str | None,
+    ) -> None:
+        device_id = request.get("device_id")
+        action_id = request.get("action_id")
+        if not isinstance(device_id, str) or not isinstance(action_id, str):
+            return
+        if error is not None:
+            return
+        if action_id == "UNBLOCK":
+            active = self.active_healings.pop(device_id, None)
+            self.next_anomaly_report_at.pop(device_id, None)
+            self.cloud.submit(
+                {
+                    "flag": "healing_expired",
+                    "device_id": device_id,
+                    "action_id": (active or {}).get("action_id"),
+                    "trigger": request.get("source", "manual"),
+                    "result": result,
+                }
+            )
+            return
+        action = CLOUD_ACTIONS.get(action_id)
+        if action is None or not action.reversible:
+            return
+        now = time.monotonic()
+        self.active_healings[device_id] = {
+            "action_id": action_id,
+            "device_id": device_id,
+            "ipv4": request.get("ipv4"),
+            "mac_address": request.get("mac_address"),
+            "parameters": request.get("parameters", {}),
+            "source": request.get("source", "dashboard"),
+            "started_at": now,
+            "unblock_at": now + self.healing_auto_unblock_seconds,
+            "next_heartbeat_at": now + self.healing_heartbeat_interval_seconds,
+            "unblock_queued": False,
+        }
+        self.next_anomaly_report_at.pop(device_id, None)
+        self.cloud.submit(
+            {
+                "flag": "healing_active",
+                "device_id": device_id,
+                "action_id": action_id,
+                "action_name": action.name,
+                "auto_unblock_in_seconds": self.healing_auto_unblock_seconds,
+                "source": request.get("source", "dashboard"),
+                "result": result,
+            }
+        )
+
+    def _maintain_healings(self) -> None:
+        if not self.active_healings:
+            return
+        now = time.monotonic()
+        for device_id, entry in list(self.active_healings.items()):
+            if not entry["unblock_queued"] and now >= entry["unblock_at"]:
+                request_id = uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"iot-guard:auto-unblock:{entry['started_at']}:{device_id}",
+                ).hex
+                queued = self.database.create_healing_request(
+                    request_id,
+                    "UNBLOCK",
+                    device_id,
+                    {
+                        "reason": "auto_expire",
+                        "original_action_id": entry["action_id"],
+                    },
+                    source="auto",
+                )
+                if queued is None:
+                    LOGGER.warning(
+                        "Auto-unblock skipped; device gone device=%s action=%s",
+                        device_id,
+                        entry["action_id"],
+                    )
+                    self.active_healings.pop(device_id, None)
+                    continue
+                entry["unblock_queued"] = True
+                LOGGER.info(
+                    "Auto-unblock queued device=%s action=%s after=%.0fs",
+                    device_id,
+                    entry["action_id"],
+                    self.healing_auto_unblock_seconds,
+                )
+                continue
+            if now >= entry["next_heartbeat_at"]:
+                elapsed = now - entry["started_at"]
+                remaining = max(0.0, entry["unblock_at"] - now)
+                self.cloud.submit(
+                    {
+                        "flag": "healing_heartbeat",
+                        "device_id": device_id,
+                        "action_id": entry["action_id"],
+                        "elapsed_seconds": round(elapsed, 3),
+                        "remaining_seconds": round(remaining, 3),
+                    }
+                )
+                entry["next_heartbeat_at"] = (
+                    now + self.healing_heartbeat_interval_seconds
+                )
 
     def _attack_context(self, window: WindowRecord) -> dict | None:
         devices_by_mac = {

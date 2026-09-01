@@ -1,0 +1,12 @@
+{
+  "devices": [
+    {
+      "mac_address": "aa:bb:cc:dd:ee:ff",
+      "name": "Living room camera"
+    },
+    {
+      "mac_address": "02:00:00:00:00:01",
+      "name": "Test smart plug"
+    }
+  ]
+}

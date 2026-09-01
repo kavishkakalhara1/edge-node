@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import statistics
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable
@@ -221,26 +222,31 @@ class FeatureEngine:
         self.resolutions = resolutions
         self.devices: dict[str, str] = {}
         self.accumulators: dict[tuple[str, int], FeatureAccumulator] = {}
+        self._lock = threading.RLock()
 
     def register_device(self, device_id: str, device_mac: str, now: float) -> None:
-        self.devices[device_id] = device_mac
-        for resolution in self.resolutions:
-            self._advance(device_id, resolution, now)
-
-    def unregister_missing(self, active_ids: set[str]) -> None:
-        self.devices = {key: value for key, value in self.devices.items() if key in active_ids}
-
-    def ingest(self, device_id: str, packet: PacketObservation) -> None:
-        if device_id not in self.devices:
-            return
-        for resolution in self.resolutions:
-            accumulator = self._advance(device_id, resolution, packet.timestamp)
-            accumulator.add(packet)
-
-    def tick(self, now: float) -> None:
-        for device_id in tuple(self.devices):
+        with self._lock:
+            self.devices[device_id] = device_mac
             for resolution in self.resolutions:
                 self._advance(device_id, resolution, now)
+
+    def unregister_missing(self, active_ids: set[str]) -> None:
+        with self._lock:
+            self.devices = {key: value for key, value in self.devices.items() if key in active_ids}
+
+    def ingest(self, device_id: str, packet: PacketObservation) -> None:
+        with self._lock:
+            if device_id not in self.devices:
+                return
+            for resolution in self.resolutions:
+                accumulator = self._advance(device_id, resolution, packet.timestamp)
+                accumulator.add(packet)
+
+    def tick(self, now: float) -> None:
+        with self._lock:
+            for device_id in tuple(self.devices):
+                for resolution in self.resolutions:
+                    self._advance(device_id, resolution, now)
 
     def _advance(self, device_id: str, resolution: int, timestamp: float) -> FeatureAccumulator:
         bucket = math.floor(timestamp / resolution) * resolution

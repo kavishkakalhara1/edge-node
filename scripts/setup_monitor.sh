@@ -10,6 +10,7 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 if [[ -e /sys/class/net/$MONITOR ]]; then
+  ip address flush dev "$MONITOR"
   ip link set "$MONITOR" up
   iw dev "$MONITOR" set channel "$CHANNEL"
   echo "$MONITOR is monitoring channel $CHANNEL."
@@ -18,6 +19,15 @@ fi
 if [[ ! -e /sys/class/net/$PARENT ]]; then
   echo "Monitor adapter $PARENT is not present." >&2
   exit 1
+fi
+HOTSPOT=${IOT_GUARD_HOTSPOT_INTERFACE:-wlan0}
+if [[ $PARENT == "$HOTSPOT" ]]; then
+  echo "Monitor parent and hotspot interface must use different radios." >&2
+  exit 1
+fi
+if command -v nmcli >/dev/null; then
+  nmcli device disconnect "$PARENT" >/dev/null 2>&1 || true
+  nmcli device set "$PARENT" managed no
 fi
 ip link set "$MONITOR" down 2>/dev/null || true
 iw dev "$MONITOR" del 2>/dev/null || true
@@ -28,6 +38,12 @@ else
   ip link set "$PARENT" up
   iw dev "$PARENT" interface add "$MONITOR" type monitor
 fi
+ip address flush dev "$MONITOR"
 ip link set "$MONITOR" up
 iw dev "$MONITOR" set channel "$CHANNEL"
+MODE=$(iw dev "$MONITOR" info | awk '$1 == "type" {print $2; exit}')
+if [[ $MODE != monitor ]]; then
+  echo "$MONITOR did not enter monitor mode." >&2
+  exit 1
+fi
 echo "$MONITOR is monitoring channel $CHANNEL."

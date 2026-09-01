@@ -167,6 +167,46 @@ def test_existing_ruleset_inserts_protected_device_exemption():
     )
 
 
+def test_existing_ruleset_replaces_blanket_scan_drop_with_selective_rules():
+    runner = NftRunner()
+
+    def existing_table(command, **kwargs):
+        runner.commands.append((command, kwargs.get("input")))
+        if command[:3] == ["nft", "list", "table"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                "table inet iot_guard { set scan_filtered { type ipv4_addr; } }",
+                "",
+            )
+        if command[:4] == ["nft", "-a", "list", "chain"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                "ip saddr @scan_filtered counter packets 0 bytes 0 drop # handle 42\n",
+                "",
+            )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    NftablesHealingExecutor(existing_table).prepare()
+
+    commands = [command for command, _input in runner.commands]
+    assert [
+        "nft", "delete", "rule", "inet", "iot_guard", "forward", "handle", "42"
+    ] in commands
+    scan_rules = [
+        command
+        for command in commands
+        if command[:4] == ["nft", "add", "rule", "inet"]
+        and "@scan_filtered" in command
+    ]
+    assert len(scan_rules) == 5
+    assert any("iot-guard-scan-null" in command for command in scan_rules)
+    assert any("iot-guard-scan-syn-rate" in command for command in scan_rules)
+    assert any("iot-guard-scan-icmp-rate" in command for command in scan_rules)
+    assert all(command[-3:-1] == ["drop", "comment"] for command in scan_rules)
+
+
 def test_mac_block_and_unblock_are_device_scoped():
     runner = NftRunner()
     executor = NftablesHealingExecutor(runner)
@@ -195,6 +235,46 @@ def test_mac_block_and_unblock_are_device_scoped():
     assert len(delete_commands) == 8
     assert any("blocked_devices" in command for command in delete_commands)
     assert sum(command[0] == "tc" for command in delete_commands) == 2
+
+
+def test_unblock_also_removes_matching_blocked_networks():
+    class NetworksListingRunner(NftRunner):
+        def __call__(self, command, **kwargs):
+            self.commands.append((command, kwargs.get("input")))
+            if command[:3] == ["nft", "list", "table"]:
+                return subprocess.CompletedProcess(command, 1, "", "table missing")
+            if command[:6] == ["nft", "list", "set", "inet", "iot_guard", "blocked_networks"]:
+                stdout = (
+                    "table inet iot_guard {\n"
+                    "  set blocked_networks {\n"
+                    "    type ipv4_addr\n"
+                    "    flags interval\n"
+                    "    elements = { 10.42.0.0/24, 192.168.1.0/24 }\n"
+                    "  }\n}\n"
+                )
+                return subprocess.CompletedProcess(command, 0, stdout, "")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+    runner = NetworksListingRunner()
+    executor = NftablesHealingExecutor(runner)
+    result = executor.execute(
+        {
+            "action_id": "UNBLOCK",
+            "ipv4": "10.42.0.2",
+            "mac_address": None,
+            "connected": 0,
+            "parameters": {},
+        }
+    )
+
+    assert "blocked_networks:10.42.0.0/24" in result["removed"]
+    assert "blocked_networks:192.168.1.0/24" not in result["removed"]
+    deletes = [command for command, _input in runner.commands
+               if command[:2] == ["nft", "delete"] and "blocked_networks" in command]
+    assert deletes == [
+        ["nft", "delete", "element", "inet", "iot_guard", "blocked_networks",
+         "{ 10.42.0.0/24 }"]
+    ]
 
 
 def request(action_id, parameters=None):

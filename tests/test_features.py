@@ -1,4 +1,8 @@
-from iot_guard.features import FeatureAccumulator, PacketObservation
+import threading
+import time
+from dataclasses import replace
+
+from iot_guard.features import FeatureAccumulator, FeatureEngine, PacketObservation
 
 
 MODEL_FEATURES = {
@@ -65,3 +69,56 @@ def test_feature_window_retains_dominant_incoming_peer():
     assert result.top_incoming_peer_mac == "02:00:00:00:00:01"
     assert result.top_incoming_peer_ip == "10.42.0.2"
     assert result.top_outgoing_peer_mac is None
+
+
+def test_feature_accumulator_tracks_both_ap_traffic_directions():
+    device_mac = "02:00:00:00:00:01"
+    peer_mac = "02:00:00:00:00:02"
+    accumulator = FeatureAccumulator("iot-test", device_mac, 0, 2)
+    outgoing = packet(1.0)
+    incoming = replace(
+        outgoing,
+        timestamp=1.5,
+        src_mac=peer_mac,
+        dst_mac=device_mac,
+        src_ip="1.1.1.1",
+        dst_ip="10.42.0.2",
+        src_port=443,
+        dst_port=50000,
+    )
+
+    accumulator.add(outgoing)
+    accumulator.add(incoming)
+    result = accumulator.finish()
+
+    assert result.features["network_packets_src_count"] == 1
+    assert result.features["network_packets_dst_count"] == 1
+    assert result.top_outgoing_peer_mac == peer_mac
+    assert result.top_incoming_peer_mac == peer_mac
+
+
+def test_feature_engine_serializes_concurrent_window_advances():
+    completed = []
+
+    def finish(record):
+        time.sleep(0.02)
+        completed.append(record)
+
+    engine = FeatureEngine(finish, resolutions=(2,))
+    engine.register_device("iot-test", "02:00:00:00:00:01", 0)
+    engine.ingest("iot-test", packet(1.0))
+    barrier = threading.Barrier(3)
+
+    def advance():
+        barrier.wait()
+        engine.tick(2.0)
+
+    threads = [threading.Thread(target=advance) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    barrier.wait()
+    for thread in threads:
+        thread.join()
+
+    assert len(completed) == 1
+    assert completed[0].packet_count == 1

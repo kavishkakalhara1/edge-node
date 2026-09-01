@@ -3,7 +3,6 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="10">
   <title>IoT Guard</title>
   <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
 </head>
@@ -13,15 +12,30 @@
       <p class="eyebrow">Raspberry Pi 5 · Passive monitor</p>
       <h1>IoT Guard</h1>
     </div>
-    <div class="live"><span></span> Live · SLST · refreshes every 10s</div>
+    <div class="live" id="live-status"><span class="live-dot"></span><span class="live-label">Live · SLST · updates every 5s</span></div>
   </header>
 
   <main>
     <section class="metrics" aria-label="Fleet summary">
-      <div><strong>{{ counts.total or 0 }}</strong><span>Known devices</span></div>
-      <div><strong>{{ counts.connected or 0 }}</strong><span>Connected now</span></div>
-      <div><strong>{{ counts.elevated or 0 }}</strong><span>High risk</span></div>
-      <div><strong>{{ recent|length }}</strong><span>Recent alerts</span></div>
+      <div><strong id="metric-total">{{ counts.total or 0 }}</strong><span>Known devices</span></div>
+      <div><strong id="metric-connected">{{ counts.connected or 0 }}</strong><span>Connected now</span></div>
+      <div><strong id="metric-elevated">{{ counts.elevated or 0 }}</strong><span>High risk</span></div>
+      <div><strong id="metric-alerts">{{ recent|length + wireless_alerts|length }}</strong><span>Recent alerts</span></div>
+    </section>
+
+    <section class="admin-panel" aria-labelledby="admin-heading">
+      <div class="section-heading">
+        <div><p class="eyebrow">Restricted controls</p><h2 id="admin-heading">Admin panel</h2></div>
+        <span>Database and device controls</span>
+      </div>
+      <div class="admin-controls">
+        <label><span>Admin token</span><input id="admin-token" type="password" autocomplete="current-password"></label>
+        <label><span>Find device</span><input id="device-filter" type="search" placeholder="Name, IP, MAC, or ID"></label>
+        <label><span>Connection</span><select id="state-filter"><option value="all">All devices</option><option value="online">Online</option><option value="offline">Offline</option><option value="elevated">Elevated risk</option></select></label>
+        <button id="show-hidden" class="secondary-button" type="button">Show hidden</button>
+        <button class="danger-button" type="button" onclick="resetDatabase()">Reset database</button>
+      </div>
+      <p class="action-message" id="admin-message" role="status"></p>
     </section>
 
     {% if latency %}
@@ -47,19 +61,21 @@
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Device</th><th>IP / MAC</th><th>State</th><th>24h</th><th>Risk</th></tr></thead>
-            <tbody>
+            <thead><tr><th>Device</th><th>IP / MAC</th><th>State</th><th>24h</th><th>Risk</th><th>Admin</th></tr></thead>
+            <tbody id="device-rows">
             {% for device in devices %}
-              <tr>
+              <tr class="device-row" data-device-id="{{ device.device_id }}" data-state="{{ 'online' if device.connected else 'offline' }}" data-risk="{{ device.risk_score }}">
                 <td><a href="/devices/{{ device.device_id }}">{{ device.hostname or device.device_id }}</a><small>{{ device.device_id }}</small></td>
                 <td>{{ device.ipv4 or 'Unknown IP' }}<small>{{ device.mac_address or 'Unknown MAC' }}</small></td>
                 <td><span class="state {{ 'online' if device.connected else 'offline' }}">{{ 'online' if device.connected else 'offline' }}</span></td>
                 <td>{{ device.anomalies_24h }}</td>
                 <td><div class="risk"><span class="risk-bar {{ device.risk_level }}" style="width: {{ device.risk_score * 100 }}%"></span></div><b>{{ '%.2f'|format(device.risk_score) }}</b></td>
+                <td class="row-actions"><button type="button" onclick="unblockDevice('{{ device.device_id }}')">Unblock</button><button type="button" onclick="hideDevice('{{ device.device_id }}')">Hide</button></td>
               </tr>
             {% else %}
-              <tr><td colspan="5" class="empty">No hotspot clients have been observed.</td></tr>
+              <tr><td colspan="6" class="empty">No hotspot clients have been observed.</td></tr>
             {% endfor %}
+              <tr id="filtered-empty" hidden><td colspan="6" class="empty">No devices match the current filters.</td></tr>
             </tbody>
           </table>
         </div>
@@ -67,7 +83,7 @@
 
       <aside class="alerts">
         <div class="section-heading"><h2>Anomalies</h2><span>Latest detections</span></div>
-        <ol>
+        <ol id="anomaly-list">
         {% for event in recent[:12] %}
           <li>
             <span class="alert-mark {{ event.anomaly_type }}"></span>
@@ -82,8 +98,410 @@
           <li class="empty">No anomalies recorded.</li>
         {% endfor %}
         </ol>
+        <div class="section-heading wireless-heading"><h2>Wireless security</h2><span>Optional monitor</span></div>
+        <ol id="wireless-list">
+        {% for alert in wireless_alerts[:8] %}
+          <li>
+            <span class="alert-mark wireless"></span>
+            <div>
+              <strong>{{ alert.details.attack_class|replace('_', ' ') }}</strong>
+              <p>{{ alert.details.source_mac or 'Unknown source' }}{% if alert.details.signal_dbm is not none %} · {{ alert.details.signal_dbm }} dBm{% endif %}</p>
+            </div>
+            <time>{{ alert.created_at|sl_time }}</time>
+          </li>
+        {% else %}
+          <li class="empty">No wireless attacks recorded.</li>
+        {% endfor %}
+        </ol>
       </aside>
     </section>
+
+    <section class="cloud-deliveries" aria-labelledby="cloud-deliveries-heading">
+      <div class="section-heading">
+        <div><p class="eyebrow">Cloud uplink</p><h2 id="cloud-deliveries-heading">Cloud API requests</h2></div>
+        <span>Last 50 deliveries (newest first)</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Flag</th>
+              <th>Device</th>
+              <th>Status</th>
+              <th>Duration</th>
+              <th>Detail</th>
+            </tr>
+          </thead>
+          <tbody id="cloud-delivery-rows">
+          {% for delivery in cloud_deliveries[:50] %}
+            <tr class="cloud-delivery-row delivery-{{ delivery.status }}">
+              <td>{{ delivery.created_at|sl_datetime }}</td>
+              <td><span class="delivery-flag flag-{{ delivery.flag }}">{{ delivery.flag|replace('_', ' ') }}</span></td>
+              <td>{% if delivery.device_id %}<a href="/devices/{{ delivery.device_id }}">{{ delivery.device_id }}</a>{% else %}<small>—</small>{% endif %}</td>
+              <td><span class="delivery-status status-{{ delivery.status }}">{{ delivery.status }}</span></td>
+              <td>{% if delivery.duration_ms is not none %}{{ '%.0f'|format(delivery.duration_ms) }} ms{% else %}<small>—</small>{% endif %}</td>
+              <td class="delivery-detail">{{ delivery.error or (delivery.payload.action_id if delivery.payload else '') or '' }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="empty">No cloud API requests recorded yet.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
   </main>
+  <script>
+    const tokenInput = document.getElementById("admin-token");
+    const deviceFilter = document.getElementById("device-filter");
+    const stateFilter = document.getElementById("state-filter");
+    const adminMessage = document.getElementById("admin-message");
+    const liveStatus = document.getElementById("live-status");
+    const liveLabel = liveStatus.querySelector(".live-label");
+    const deviceRows = document.getElementById("device-rows");
+    const anomalyList = document.getElementById("anomaly-list");
+    const wirelessList = document.getElementById("wireless-list");
+    const cloudDeliveryRows = document.getElementById("cloud-delivery-rows");
+    const hiddenKey = "iot-guard-hidden-devices";
+    let hiddenDevices = new Set(JSON.parse(localStorage.getItem(hiddenKey) || "[]"));
+    let refreshInProgress = false;
+
+    tokenInput.value = sessionStorage.getItem("iot-guard-admin-token") || "";
+    tokenInput.addEventListener("input", () => sessionStorage.setItem("iot-guard-admin-token", tokenInput.value));
+    deviceFilter.value = sessionStorage.getItem("iot-guard-device-filter") || "";
+    stateFilter.value = sessionStorage.getItem("iot-guard-state-filter") || "all";
+
+    function applyDeviceFilters() {
+      const query = deviceFilter.value.trim().toLowerCase();
+      const state = stateFilter.value;
+      let visible = 0;
+      document.querySelectorAll(".device-row").forEach((row) => {
+        const matchesText = !query || row.textContent.toLowerCase().includes(query);
+        const matchesState = state === "all" || row.dataset.state === state ||
+          (state === "elevated" && Number(row.dataset.risk) >= 0.5);
+        const show = matchesText && matchesState && !hiddenDevices.has(row.dataset.deviceId);
+        row.hidden = !show;
+        visible += Number(show);
+      });
+      document.getElementById("filtered-empty").hidden = visible !== 0 || document.querySelectorAll(".device-row").length === 0;
+      document.getElementById("show-hidden").textContent = `Show hidden (${hiddenDevices.size})`;
+      sessionStorage.setItem("iot-guard-device-filter", deviceFilter.value);
+      sessionStorage.setItem("iot-guard-state-filter", stateFilter.value);
+    }
+
+    function hideDevice(deviceId) {
+      hiddenDevices.add(deviceId);
+      localStorage.setItem(hiddenKey, JSON.stringify([...hiddenDevices]));
+      applyDeviceFilters();
+    }
+
+    function appendText(parent, tagName, text, className) {
+      const element = document.createElement(tagName);
+      if (className) element.className = className;
+      element.textContent = text;
+      parent.appendChild(element);
+      return element;
+    }
+
+    function formatTime(value) {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "Unknown time";
+      return new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Colombo",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false
+      }).format(date);
+    }
+
+    function renderMetrics(data) {
+      document.getElementById("metric-total").textContent = data.counts.total || 0;
+      document.getElementById("metric-connected").textContent = data.counts.connected || 0;
+      document.getElementById("metric-elevated").textContent = data.counts.elevated || 0;
+      document.getElementById("metric-alerts").textContent = data.recent.length + data.wireless_alerts.length;
+    }
+
+    function renderDevices(devices) {
+      const fragment = document.createDocumentFragment();
+      devices.forEach((device) => {
+        const riskScore = Number(device.risk_score) || 0;
+        const state = device.connected ? "online" : "offline";
+        const row = document.createElement("tr");
+        row.className = "device-row";
+        row.dataset.deviceId = device.device_id;
+        row.dataset.state = state;
+        row.dataset.risk = riskScore;
+
+        const identity = document.createElement("td");
+        const link = appendText(identity, "a", device.hostname || device.device_id);
+        link.href = `/devices/${encodeURIComponent(device.device_id)}`;
+        appendText(identity, "small", device.device_id);
+        row.appendChild(identity);
+
+        const address = document.createElement("td");
+        address.appendChild(document.createTextNode(device.ipv4 || "Unknown IP"));
+        appendText(address, "small", device.mac_address || "Unknown MAC");
+        row.appendChild(address);
+
+        const stateCell = document.createElement("td");
+        appendText(stateCell, "span", state, `state ${state}`);
+        row.appendChild(stateCell);
+        appendText(row, "td", device.anomalies_24h || 0);
+
+        const riskCell = document.createElement("td");
+        const risk = appendText(riskCell, "div", "", "risk");
+        const riskLevel = ["low", "medium", "high", "critical"].includes(device.risk_level) ? device.risk_level : "low";
+        const bar = appendText(risk, "span", "", `risk-bar ${riskLevel}`);
+        bar.style.width = `${Math.min(1, Math.max(0, riskScore)) * 100}%`;
+        appendText(riskCell, "b", riskScore.toFixed(2));
+        row.appendChild(riskCell);
+
+        const actions = appendText(row, "td", "", "row-actions");
+        const unblock = appendText(actions, "button", "Unblock");
+        unblock.type = "button";
+        unblock.dataset.action = "unblock";
+        const hide = appendText(actions, "button", "Hide");
+        hide.type = "button";
+        hide.dataset.action = "hide";
+        fragment.appendChild(row);
+      });
+
+      if (!devices.length) {
+        const emptyRow = document.createElement("tr");
+        const emptyCell = appendText(emptyRow, "td", "No hotspot clients have been observed.", "empty");
+        emptyCell.colSpan = 6;
+        fragment.appendChild(emptyRow);
+      }
+      const filteredRow = document.createElement("tr");
+      filteredRow.id = "filtered-empty";
+      filteredRow.hidden = true;
+      const filteredCell = appendText(filteredRow, "td", "No devices match the current filters.", "empty");
+      filteredCell.colSpan = 6;
+      fragment.appendChild(filteredRow);
+      deviceRows.replaceChildren(fragment);
+      applyDeviceFilters();
+    }
+
+    function renderAnomalies(events) {
+      const fragment = document.createDocumentFragment();
+      events.slice(0, 12).forEach((event) => {
+        const item = document.createElement("li");
+        const anomalyType = String(event.anomaly_type || "anomaly");
+        const markClass = anomalyType === "point" || anomalyType === "temporal" ? anomalyType : "anomaly";
+        appendText(item, "span", "", `alert-mark ${markClass}`);
+        const details = document.createElement("div");
+        const link = appendText(details, "a", event.hostname || event.device_id);
+        link.href = `/devices/${encodeURIComponent(event.device_id)}`;
+        appendText(details, "p", `${anomalyType.replaceAll("_", " ")} · risk ${(Number(event.risk_after) || 0).toFixed(2)}`);
+        if (event.attacker) {
+          const attacker = event.attacker;
+          const name = attacker.hostname || attacker.ipv4 || attacker.device_id || "Unknown attacker";
+          appendText(details, "p", `Suspected attacker: ${name} · ${attacker.mac_address || "Unknown MAC"}`);
+        }
+        item.appendChild(details);
+        appendText(item, "time", formatTime(event.observed_at));
+        fragment.appendChild(item);
+      });
+      if (!events.length) appendText(fragment, "li", "No anomalies recorded.", "empty");
+      anomalyList.replaceChildren(fragment);
+    }
+
+    function renderWireless(alerts) {
+      const fragment = document.createDocumentFragment();
+      alerts.slice(0, 8).forEach((alert) => {
+        const item = document.createElement("li");
+        appendText(item, "span", "", "alert-mark wireless");
+        const details = document.createElement("div");
+        const values = alert.details || {};
+        appendText(details, "strong", String(values.attack_class || "wireless alert").replaceAll("_", " "));
+        const signal = values.signal_dbm == null ? "" : ` · ${values.signal_dbm} dBm`;
+        appendText(details, "p", `${values.source_mac || "Unknown source"}${signal}`);
+        item.appendChild(details);
+        appendText(item, "time", formatTime(alert.created_at));
+        fragment.appendChild(item);
+      });
+      if (!alerts.length) appendText(fragment, "li", "No wireless attacks recorded.", "empty");
+      wirelessList.replaceChildren(fragment);
+    }
+
+    function renderCloudDeliveries(deliveries) {
+      const fragment = document.createDocumentFragment();
+      deliveries.slice(0, 50).forEach((delivery) => {
+        const row = document.createElement("tr");
+        const status = String(delivery.status || "").toLowerCase();
+        const flag = String(delivery.flag || "").toLowerCase();
+        row.className = `cloud-delivery-row delivery-${status}`;
+        appendText(row, "td", formatTime(delivery.created_at));
+
+        const flagCell = document.createElement("td");
+        appendText(flagCell, "span", flag.replaceAll("_", " ") || "unknown", `delivery-flag flag-${flag}`);
+        if (Array.isArray(data.cloud_deliveries)) {
+          renderCloudDeliveries(data.cloud_deliveries);
+        } else {
+          refreshCloudDeliveries();
+        }
+        row.appendChild(flagCell);
+
+        const deviceCell = document.createElement("td");
+        if (delivery.device_id) {
+          const link = appendText(deviceCell, "a", delivery.device_id);
+          link.href = `/devices/${encodeURIComponent(delivery.device_id)}`;
+        } else {
+          appendText(deviceCell, "small", "—");
+        }
+        row.appendChild(deviceCell);
+
+        const statusCell = document.createElement("td");
+        appendText(statusCell, "span", status || "unknown", `delivery-status status-${status}`);
+        row.appendChild(statusCell);
+
+        const duration = delivery.duration_ms == null ? "" : `${Math.round(Number(delivery.duration_ms))} ms`;
+        if (duration) {
+          appendText(row, "td", duration);
+        } else {
+          const durationCell = document.createElement("td");
+          appendText(durationCell, "small", "—");
+          row.appendChild(durationCell);
+        }
+
+        const detail = delivery.error
+          || (delivery.payload && delivery.payload.action_id)
+          || "";
+        appendText(row, "td", detail, "delivery-detail");
+
+        fragment.appendChild(row);
+      });
+      if (!deliveries.length) {
+        const emptyRow = document.createElement("tr");
+        const emptyCell = appendText(emptyRow, "td", "No cloud API requests recorded yet.", "empty");
+        emptyCell.colSpan = 6;
+        fragment.appendChild(emptyRow);
+      }
+      cloudDeliveryRows.replaceChildren(fragment);
+    }
+
+    async function refreshCloudDeliveries() {
+      try {
+        const response = await fetch("/api/cloud-deliveries", {cache: "no-store"});
+        if (!response.ok) return;
+        const body = await response.json();
+        renderCloudDeliveries(body.deliveries || []);
+      } catch (error) {
+        console.warn(error);
+      }
+    }
+
+    async function refreshDashboard() {
+      if (refreshInProgress || document.hidden) return;
+      refreshInProgress = true;
+      try {
+        const response = await fetch("/api/devices", {cache: "no-store"});
+        if (!response.ok) throw new Error(`Dashboard update failed: ${response.status}`);
+        const data = await response.json();
+        renderMetrics(data);
+        renderDevices(data.devices);
+        renderAnomalies(data.recent);
+        renderWireless(data.wireless_alerts);
+        liveStatus.classList.remove("stale");
+        liveLabel.textContent = "Live · SLST · updates every 5s";
+      } catch (error) {
+        liveStatus.classList.add("stale");
+        liveLabel.textContent = "Update delayed · retrying";
+        console.warn(error);
+      } finally {
+        refreshInProgress = false;
+      }
+    }
+
+    deviceRows.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-action]");
+      if (!button) return;
+      const row = button.closest(".device-row");
+      if (button.dataset.action === "unblock") unblockDevice(row.dataset.deviceId);
+      if (button.dataset.action === "hide") hideDevice(row.dataset.deviceId);
+    });
+
+    document.getElementById("show-hidden").addEventListener("click", () => {
+      hiddenDevices.clear();
+      localStorage.removeItem(hiddenKey);
+      applyDeviceFilters();
+    });
+    deviceFilter.addEventListener("input", applyDeviceFilters);
+    stateFilter.addEventListener("change", applyDeviceFilters);
+
+    function errorDetail(body) {
+      return typeof body.detail === "string" ? body.detail : "The admin request failed.";
+    }
+
+    async function unblockDevice(deviceId) {
+      if (!tokenInput.value) {
+        adminMessage.textContent = "Enter the admin token first.";
+        tokenInput.focus();
+        return;
+      }
+      const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/healing-actions/UNBLOCK`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json", "X-IoT-Guard-Token": tokenInput.value},
+        body: JSON.stringify({parameters: {reason: "dashboard admin unblock"}})
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        adminMessage.textContent = errorDetail(body);
+        return;
+      }
+      adminMessage.textContent = "Unblock queued; waiting for the healing worker…";
+      const outcome = await pollHealingStatus(body.request_id, tokenInput.value);
+      if (outcome === null) {
+        adminMessage.textContent = "Unblock queued but the healing worker did not report an outcome yet.";
+      } else if (outcome.status === "succeeded") {
+        adminMessage.textContent = "Unblock applied by the healing worker.";
+      } else {
+        adminMessage.textContent = `Unblock failed: ${outcome.error || "unknown error"}`;
+      }
+    }
+
+    async function pollHealingStatus(requestId, token, attempts = 15, delayMs = 1000) {
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+        const response = await fetch(`/api/healing-actions/${encodeURIComponent(requestId)}`, {
+          headers: {"X-IoT-Guard-Token": token},
+          cache: "no-store"
+        });
+        if (!response.ok) continue;
+        const body = await response.json();
+        if (body.status === "succeeded" || body.status === "failed") return body;
+      }
+      return null;
+    }
+
+    async function resetDatabase() {
+      if (!tokenInput.value) {
+        adminMessage.textContent = "Enter the admin token first.";
+        tokenInput.focus();
+        return;
+      }
+      const confirmation = window.prompt("Type RESET to delete all dashboard data.");
+      if (confirmation !== "RESET") return;
+      const response = await fetch("/api/admin/reset-database", {
+        method: "POST",
+        headers: {"Content-Type": "application/json", "X-IoT-Guard-Token": tokenInput.value},
+        body: JSON.stringify({confirmation})
+      });
+      const body = await response.json();
+      if (response.ok) {
+        hiddenDevices.clear();
+        localStorage.removeItem(hiddenKey);
+        window.location.reload();
+      } else {
+        adminMessage.textContent = errorDetail(body);
+      }
+    }
+
+    applyDeviceFilters();
+    window.setInterval(refreshDashboard, 5000);
+  </script>
 </body>
 </html>
