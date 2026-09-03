@@ -48,6 +48,10 @@ templates.env.filters["sl_time"] = sl_time
 
 def dashboard_data() -> dict:
     data = database.dashboard()
+    data["cloud_connection"] = {
+        "configured": bool(settings.cloud_api_endpoint),
+        "enabled": database.cloud_delivery_enabled(),
+    }
     ignored_macs = set(settings.ignored_device_macs)
     if not ignored_macs:
         return data
@@ -76,6 +80,10 @@ class HealingRequestBody(BaseModel):
 
 class AdminResetBody(BaseModel):
     confirmation: str
+
+
+class CloudConnectionBody(BaseModel):
+    enabled: bool
 
 
 def require_healing_token(x_iot_guard_token: str | None = Header(default=None)) -> None:
@@ -152,6 +160,27 @@ def api_cloud_deliveries(limit: int = 50):
     if limit < 1 or limit > 500:
         raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
     return {"deliveries": database.cloud_deliveries(limit=limit)}
+
+
+@app.get("/api/admin/cloud-connection")
+def cloud_connection_status():
+    return {
+        "configured": bool(settings.cloud_api_endpoint),
+        "enabled": database.cloud_delivery_enabled(),
+    }
+
+
+@app.put("/api/admin/cloud-connection")
+def update_cloud_connection(
+    body: CloudConnectionBody,
+    x_iot_guard_token: str | None = Header(default=None),
+):
+    require_healing_token(x_iot_guard_token)
+    database.set_cloud_delivery_enabled(body.enabled)
+    return {
+        "configured": bool(settings.cloud_api_endpoint),
+        "enabled": body.enabled,
+    }
 
 
 @app.post(

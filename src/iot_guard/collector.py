@@ -106,6 +106,9 @@ class Collector:
             NftablesHealingExecutor(
                 hotspot_interface=settings.hotspot_interface,
                 protected_macs=settings.protected_device_macs,
+                default_isolation_ttl_seconds=max(
+                    1, int(settings.healing_auto_unblock_seconds)
+                ),
             ),
             completion_listener=self._on_healing_completed,
         )
@@ -115,6 +118,7 @@ class Collector:
             token=settings.cloud_api_token,
             timeout_seconds=settings.cloud_api_timeout_seconds,
             recorder=self.database.record_cloud_delivery,
+            enabled_provider=self.database.cloud_delivery_enabled,
         )
         self.next_anomaly_report_at: dict[str, float] = {}
         self.anomaly_report_interval_seconds = settings.cloud_anomaly_interval_seconds

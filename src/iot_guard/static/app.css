@@ -104,7 +104,7 @@ main { padding: 28px clamp(20px, 5vw, 72px) 60px; }
 .admin-panel .section-heading .eyebrow { margin-bottom: 2px; }
 .admin-controls {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.5fr) minmax(150px, 0.8fr) auto auto;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.5fr) minmax(150px, 0.8fr) auto auto auto;
   align-items: end;
   gap: 12px;
   padding: 16px 20px;
@@ -121,6 +121,38 @@ main { padding: 28px clamp(20px, 5vw, 72px) 60px; }
   font: inherit;
   font-size: 13px;
 }
+.cloud-control {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cloud-control > div > span { display: block; color: var(--muted); font-size: 10px; text-transform: uppercase; }
+.cloud-control strong { display: block; font-size: 12px; white-space: nowrap; }
+.switch { position: relative; width: 38px; height: 22px; flex: 0 0 auto; }
+.switch input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.switch-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 11px;
+  background: #aeb8b4;
+  cursor: pointer;
+}
+.switch-track::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  top: 3px;
+  left: 3px;
+  border-radius: 50%;
+  background: var(--surface);
+  transition: transform 150ms ease;
+}
+.switch input:checked + .switch-track { background: var(--green); }
+.switch input:checked + .switch-track::after { transform: translateX(16px); }
+.switch input:focus-visible + .switch-track { outline: 2px solid var(--ink); outline-offset: 2px; }
+.switch input:disabled + .switch-track { cursor: not-allowed; opacity: 0.45; }
 .secondary-button, .danger-button, .row-actions button {
   min-height: 36px;
   border: 1px solid var(--line);

@@ -93,6 +93,11 @@ CREATE TABLE IF NOT EXISTS cloud_deliveries (
 );
 CREATE INDEX IF NOT EXISTS idx_cloud_deliveries_time
 ON cloud_deliveries(created_at DESC);
+CREATE TABLE IF NOT EXISTS runtime_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -376,6 +381,26 @@ class Database:
                 (int(limit),),
             ).fetchall()
         return [self._cloud_delivery_dict(row) for row in rows]
+
+    def cloud_delivery_enabled(self) -> bool:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT value FROM runtime_settings WHERE key = 'cloud_delivery_enabled'"
+            ).fetchone()
+        return row is None or row["value"] == "true"
+
+    def set_cloud_delivery_enabled(self, enabled: bool) -> bool:
+        value = "true" if enabled else "false"
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO runtime_settings(key, value, updated_at)
+                VALUES ('cloud_delivery_enabled', ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at""",
+                (value, utc_now()),
+            )
+        return enabled
 
     @staticmethod
     def _cloud_delivery_dict(row: sqlite3.Row) -> dict:
@@ -665,6 +690,7 @@ class Database:
             "traffic_windows",
             "service_logs",
             "cloud_deliveries",
+            "runtime_settings",
             "devices",
         )
         deleted: dict[str, int] = {}

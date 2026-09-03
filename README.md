@@ -133,6 +133,8 @@ sudo systemctl restart iot-guard-collector iot-guard-web
 | `IOT_GUARD_CLOUD_API_TOKEN` | empty | Optional cloud bearer token. |
 | `IOT_GUARD_CLOUD_API_TIMEOUT_SECONDS` | `30` | Cloud HTTP timeout. |
 | `IOT_GUARD_CLOUD_ANOMALY_INTERVAL_SECONDS` | `120` | Minimum successful report interval per device. |
+| `IOT_GUARD_HEALING_AUTO_UNBLOCK_SECONDS` | `60` | Default reversible-action lifetime and SEG-03 nftables timeout. |
+| `IOT_GUARD_HEALING_HEARTBEAT_INTERVAL_SECONDS` | `30` | Cloud heartbeat interval while reversible healing is active. |
 | `IOT_GUARD_RETENTION_DAYS` | `30` | Historical database retention. |
 | `IOT_GUARD_MODEL_CPU_THREADS` | `2` | PyTorch CPU threads. |
 | `IOT_GUARD_MODEL_BUFFER_TIMEOUT_SECONDS` | `120` | Stale rolling-buffer timeout. |
@@ -280,7 +282,7 @@ Risk and consecutive-anomaly state reset at UTC day boundaries. Historical recor
 
 ## Cloud reporting
 
-Cloud reporting is disabled when `IOT_GUARD_CLOUD_API_ENDPOINT` is empty. When enabled, HTTP(S) sockets are bound to `IOT_GUARD_CLOUD_UPLINK_INTERFACE` with `SO_BINDTODEVICE`. An optional token is sent as `Authorization: Bearer <token>`.
+Cloud reporting is unavailable when `IOT_GUARD_CLOUD_API_ENDPOINT` is empty. When configured, an administrator can pause or resume delivery from the dashboard without removing the endpoint or restarting the collector. The toggle state is persisted in SQLite and defaults to enabled. HTTP(S) sockets are bound to `IOT_GUARD_CLOUD_UPLINK_INTERFACE` with `SO_BINDTODEVICE`. An optional token is sent as `Authorization: Bearer <token>`.
 
 Only detected anomalies are sent. This is enforced twice:
 
@@ -324,7 +326,7 @@ The cloud may return an `actions` array. It may target an explicit `device_id`, 
 
 ## Dashboard and API
 
-The dashboard shows connected and historical devices, SLST (`Asia/Colombo`) timestamps, risk, recent anomalies, model features, attacker/victim context, and healing status. It supports device filtering, unblocking, and a token-protected database reset.
+The dashboard shows connected and historical devices, SLST (`Asia/Colombo`) timestamps, risk, recent anomalies, model features, attacker/victim context, healing status, and cloud delivery history. It supports device filtering, unblocking, a token-protected cloud connection toggle, and a token-protected database reset.
 
 | Method and path | Purpose | Token required |
 | --- | --- | --- |
@@ -332,6 +334,9 @@ The dashboard shows connected and historical devices, SLST (`Asia/Colombo`) time
 | `GET /devices/{device_id}` | Device detail. | No |
 | `GET /api/devices` | Dashboard JSON. | No |
 | `GET /api/devices/{device_id}` | Device JSON. | No |
+| `GET /api/cloud-deliveries` | Recent cloud delivery attempts. | No |
+| `GET /api/admin/cloud-connection` | Read cloud connection state. | No |
+| `PUT /api/admin/cloud-connection` | Enable or disable cloud delivery. | Yes |
 | `GET /health` | Web/database health. | No |
 | `POST /api/devices/{device_id}/healing-actions/{action_id}` | Queue action. | Yes |
 | `GET /api/healing-actions/{request_id}` | Read action status. | Yes |
@@ -353,7 +358,7 @@ Automatic cloud actions:
 | `NET-05` | Timed NULL/FIN/Xmas, SYN-rate, and ICMP-rate scan filtering. |
 | `NET-08` | Fixed bidirectional device traffic shaping. |
 | `SEG-02` | MAC block in both directions. |
-| `SEG-03` | Full IPv4 isolation with optional heartbeat exception. |
+| `SEG-03` | Timed bidirectional IPv4 isolation with an optional heartbeat exception. |
 | `L2-01`, `L2-02` | Restore and pin DHCP IP-to-MAC neighbor binding. |
 | `ACC-01` | Progressive 1/5/15/60/1440-minute source ban. |
 | `ESC-01` | Operator notification in the journal. |
@@ -369,7 +374,7 @@ Dashboard/API-only parameterized actions:
 | `ESC-02` | `approved: true`; applies permanent isolation. |
 | `UNBLOCK` | Internal action that removes device controls. |
 
-Most actions require the target to be currently connected with a valid leased IPv4. Protected MACs cannot be targeted. `UNBLOCK` removes IPv4/MAC set entries, pair entries, and the deterministic per-device `tc` filters. Full details and feasibility notes are in `docs/healing-actions.json`.
+Most actions require the target to be currently connected with a valid leased IPv4. Protected MACs cannot be targeted. SEG-03 stores its expiry in nftables, so isolation still expires if the collector restarts. `UNBLOCK` removes IPv4/MAC set entries, pair entries, heartbeat exceptions, and the deterministic per-device `tc` filters. Full details and feasibility notes are in `docs/healing-actions.json`.
 
 Queue and inspect an action from the management network:
 

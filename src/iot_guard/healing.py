@@ -56,10 +56,12 @@ class NftablesHealingExecutor:
         runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
         hotspot_interface: str = "wlan1",
         protected_macs: tuple[str, ...] = (),
+        default_isolation_ttl_seconds: int = 60,
     ) -> None:
         self.runner = runner
         self.hotspot_interface = hotspot_interface
         self.protected_macs = tuple(self._mac(mac) for mac in protected_macs)
+        self.default_isolation_ttl_seconds = default_isolation_ttl_seconds
 
     def prepare(self) -> None:
         self._ensure_ruleset()
@@ -106,7 +108,7 @@ class NftablesHealingExecutor:
         if request["action_id"] == "ESC-02":
             if request["parameters"].get("approved") is not True:
                 raise HealingActionError("ESC-02 requires approved=true")
-            return self._full_isolation(device_ipv4, {}) | {"permanent": True}
+            return self._full_isolation(device_ipv4, {"permanent": True})
         if request["action_id"] == "ESC-03":
             return {
                 "report_generated": True,
@@ -278,8 +280,8 @@ class NftablesHealingExecutor:
             device_ipv4 = None
         if device_ipv4:
             for set_name in (
-                "blocked_sources", "isolated_devices", "flood_hardened",
-                "scan_filtered", "progressive_bans",
+                "blocked_sources", "isolated_devices", "timed_isolated_devices",
+                "flood_hardened", "scan_filtered", "progressive_bans",
             ):
                 self._run(
                     ["nft", "delete", "element", "inet", "iot_guard", set_name,
@@ -287,6 +289,7 @@ class NftablesHealingExecutor:
                     ignore_missing=True,
                 )
                 removed.append(f"{set_name}:{device_ipv4}")
+            removed.extend(self._remove_heartbeat_rules(device_ipv4))
             preference = self._tc_preference(device_ipv4)
             for direction in ("ingress", "egress"):
                 self._run(
@@ -310,6 +313,39 @@ class NftablesHealingExecutor:
         if device_ipv4:
             removed.extend(self._remove_matching_networks(device_ipv4))
         return {"unblocked": True, "removed": removed}
+
+    def _remove_heartbeat_rules(self, device_ipv4: str) -> list[str]:
+        result = self.runner(
+            ["nft", "-a", "list", "chain", "inet", "iot_guard", "forward"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        marker = f"iot-guard-heartbeat-{device_ipv4}"
+        removed = []
+        for line in result.stdout.splitlines():
+            legacy_rule = (
+                " accept" in line
+                and (
+                    f"ip saddr {device_ipv4} ip daddr " in line
+                    or f" ip daddr {device_ipv4} " in line
+                )
+            )
+            if marker not in line and not legacy_rule:
+                continue
+            handle = re.search(r"# handle (\d+)", line)
+            if handle is None:
+                continue
+            self._run(
+                [
+                    "nft", "delete", "rule", "inet", "iot_guard", "forward",
+                    "handle", handle.group(1),
+                ]
+            )
+            removed.append(f"heartbeat_rule:{handle.group(1)}")
+        return removed
 
     def _remove_matching_networks(self, device_ipv4: str) -> list[str]:
         result = self.runner(
@@ -363,31 +399,50 @@ class NftablesHealingExecutor:
 
     def _full_isolation(self, device_ipv4: str, parameters: dict[str, Any]) -> dict[str, Any]:
         heartbeat = parameters.get("heartbeat_ipv4")
+        permanent = parameters.get("permanent") is True
+        ttl_seconds = None
+        if not permanent:
+            try:
+                ttl_seconds = int(
+                    parameters.get("ttl_seconds", self.default_isolation_ttl_seconds)
+                )
+            except (TypeError, ValueError) as exc:
+                raise HealingActionError("ttl_seconds must be an integer") from exc
+            if not 1 <= ttl_seconds <= 86400:
+                raise HealingActionError("ttl_seconds must be between 1 and 86400")
         if heartbeat is not None:
             heartbeat = self._ipv4(heartbeat, "heartbeat_ipv4 must be a valid IPv4 address")
+            marker = f"iot-guard-heartbeat-{device_ipv4}"
             self._run(
                 [
                     "nft", "insert", "rule", "inet", "iot_guard", "forward",
-                    "ip", "saddr", device_ipv4, "ip", "daddr", heartbeat, "accept",
+                    "ip", "saddr", device_ipv4, "ip", "daddr", heartbeat,
+                    "accept", "comment", marker,
                 ]
             )
             self._run(
                 [
                     "nft", "insert", "rule", "inet", "iot_guard", "forward",
-                    "ip", "saddr", heartbeat, "ip", "daddr", device_ipv4, "accept",
+                    "ip", "saddr", heartbeat, "ip", "daddr", device_ipv4,
+                    "accept", "comment", marker,
                 ]
             )
+        set_name = "isolated_devices" if permanent else "timed_isolated_devices"
+        element = (
+            f"{{ {device_ipv4} }}"
+            if permanent
+            else f"{{ {device_ipv4} timeout {ttl_seconds}s }}"
+        )
         self._run(
-            [
-                "nft", "add", "element", "inet", "iot_guard", "isolated_devices",
-                f"{{ {device_ipv4} }}",
-            ],
+            ["nft", "add", "element", "inet", "iot_guard", set_name, element],
             ignore_existing=True,
         )
         return {
             "device_ipv4": device_ipv4,
             "heartbeat_ipv4": heartbeat,
+            "ttl_seconds": ttl_seconds,
             "isolated": True,
+            "permanent": permanent,
         }
 
     def _ensure_ruleset(self) -> None:
@@ -410,6 +465,13 @@ class NftablesHealingExecutor:
                 "flood_hardened": (
                     "{ type ipv4_addr; flags timeout; }",
                     (("ip", "saddr", "@flood_hardened", "counter", "drop"),),
+                ),
+                "timed_isolated_devices": (
+                    "{ type ipv4_addr; flags timeout; }",
+                    (
+                        ("ip", "saddr", "@timed_isolated_devices", "counter", "drop"),
+                        ("ip", "daddr", "@timed_isolated_devices", "counter", "drop"),
+                    ),
                 ),
                 "scan_filtered": (
                     "{ type ipv4_addr; flags timeout; }",
@@ -469,6 +531,10 @@ class NftablesHealingExecutor:
     set isolated_devices {
         type ipv4_addr
     }
+    set timed_isolated_devices {
+        type ipv4_addr
+        flags timeout
+    }
     set blocked_devices {
         type ether_addr
     }
@@ -502,6 +568,8 @@ class NftablesHealingExecutor:
     __PROTECTED_RULE__        ip saddr @blocked_sources counter drop
         ip saddr @isolated_devices counter drop
         ip daddr @isolated_devices counter drop
+        ip saddr @timed_isolated_devices counter drop
+        ip daddr @timed_isolated_devices counter drop
         ether saddr @blocked_devices counter drop
         ether daddr @blocked_devices counter drop
         ip saddr @flood_hardened counter drop
@@ -629,7 +697,9 @@ class NftablesHealingExecutor:
                 text in detail
                 for text in (
                     "No such file", "No such element", "Cannot find device",
-                    "Parent Qdisc doesn't exists", "Invalid argument",
+                    "Parent Qdisc doesn't exists",
+                    "Filter with specified priority/protocol not found",
+                    "Invalid argument",
                 )
             ):
                 return

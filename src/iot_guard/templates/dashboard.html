@@ -32,6 +32,13 @@
         <label><span>Admin token</span><input id="admin-token" type="password" autocomplete="current-password"></label>
         <label><span>Find device</span><input id="device-filter" type="search" placeholder="Name, IP, MAC, or ID"></label>
         <label><span>Connection</span><select id="state-filter"><option value="all">All devices</option><option value="online">Online</option><option value="offline">Offline</option><option value="elevated">Elevated risk</option></select></label>
+        <div class="cloud-control">
+          <div><span>Cloud API</span><strong id="cloud-connection-label">{{ 'Enabled' if cloud_connection.enabled and cloud_connection.configured else 'Not configured' if not cloud_connection.configured else 'Disabled' }}</strong></div>
+          <label class="switch" title="Enable or disable cloud API delivery">
+            <input id="cloud-connection-toggle" type="checkbox" {% if cloud_connection.enabled and cloud_connection.configured %}checked{% endif %} {% if not cloud_connection.configured %}disabled{% endif %}>
+            <span class="switch-track"></span>
+          </label>
+        </div>
         <button id="show-hidden" class="secondary-button" type="button">Show hidden</button>
         <button class="danger-button" type="button" onclick="resetDatabase()">Reset database</button>
       </div>
@@ -155,6 +162,8 @@
     const tokenInput = document.getElementById("admin-token");
     const deviceFilter = document.getElementById("device-filter");
     const stateFilter = document.getElementById("state-filter");
+    const cloudConnectionToggle = document.getElementById("cloud-connection-toggle");
+    const cloudConnectionLabel = document.getElementById("cloud-connection-label");
     const adminMessage = document.getElementById("admin-message");
     const liveStatus = document.getElementById("live-status");
     const liveLabel = liveStatus.querySelector(".live-label");
@@ -338,11 +347,6 @@
 
         const flagCell = document.createElement("td");
         appendText(flagCell, "span", flag.replaceAll("_", " ") || "unknown", `delivery-flag flag-${flag}`);
-        if (Array.isArray(data.cloud_deliveries)) {
-          renderCloudDeliveries(data.cloud_deliveries);
-        } else {
-          refreshCloudDeliveries();
-        }
         row.appendChild(flagCell);
 
         const deviceCell = document.createElement("td");
@@ -405,6 +409,8 @@
         renderDevices(data.devices);
         renderAnomalies(data.recent);
         renderWireless(data.wireless_alerts);
+        renderCloudDeliveries(data.cloud_deliveries || []);
+        updateCloudConnectionState(data.cloud_connection);
         liveStatus.classList.remove("stale");
         liveLabel.textContent = "Live · SLST · updates every 5s";
       } catch (error) {
@@ -431,6 +437,44 @@
     });
     deviceFilter.addEventListener("input", applyDeviceFilters);
     stateFilter.addEventListener("change", applyDeviceFilters);
+
+    function updateCloudConnectionState(connection) {
+      if (!connection) return;
+      cloudConnectionToggle.disabled = !connection.configured;
+      cloudConnectionToggle.checked = Boolean(connection.configured && connection.enabled);
+      cloudConnectionLabel.textContent = !connection.configured
+        ? "Not configured"
+        : connection.enabled ? "Enabled" : "Disabled";
+    }
+
+    cloudConnectionToggle.addEventListener("change", async () => {
+      if (!tokenInput.value) {
+        adminMessage.textContent = "Enter the admin token first.";
+        cloudConnectionToggle.checked = !cloudConnectionToggle.checked;
+        tokenInput.focus();
+        return;
+      }
+      const requestedState = cloudConnectionToggle.checked;
+      cloudConnectionToggle.disabled = true;
+      try {
+        const response = await fetch("/api/admin/cloud-connection", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "X-IoT-Guard-Token": tokenInput.value
+          },
+          body: JSON.stringify({enabled: requestedState})
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(errorDetail(body));
+        updateCloudConnectionState(body);
+        adminMessage.textContent = `Cloud API delivery ${body.enabled ? "enabled" : "disabled"}.`;
+      } catch (error) {
+        cloudConnectionToggle.checked = !requestedState;
+        cloudConnectionToggle.disabled = false;
+        adminMessage.textContent = error.message || "Cloud connection update failed.";
+      }
+    });
 
     function errorDetail(body) {
       return typeof body.detail === "string" ? body.detail : "The admin request failed.";

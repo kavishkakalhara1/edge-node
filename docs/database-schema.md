@@ -10,4 +10,8 @@ At startup and each UTC date change, the collector resets every device's current
 
 `service_logs` stores structured operational events. Historical retention is enforced hourly by the collector using `IOT_GUARD_RETENTION_DAYS`.
 
+`cloud_deliveries` stores recent cloud request outcomes, durations, payloads, responses, and errors for the dashboard. It follows the same retention policy.
+
+`runtime_settings` stores operator-controlled runtime state. The `cloud_delivery_enabled` key allows the dashboard to pause or resume cloud requests without changing endpoint credentials or restarting services.
+
 SQLite runs in WAL mode so the collector and dashboard can operate concurrently. The deployment assumes one Raspberry Pi writer; use PostgreSQL before introducing multiple collectors.

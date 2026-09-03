@@ -57,7 +57,8 @@ def test_healing_request_is_claimed_and_completed_once(tmp_path):
     completed = database.healing_request("request-1")
     assert completed["status"] == "succeeded"
     assert completed["result"]["device_ipv4"] == "10.42.0.2"
-    assert any("isolated_devices" in command for command, _input in runner.commands)
+    assert completed["result"]["ttl_seconds"] == 60
+    assert any("timed_isolated_devices" in command for command, _input in runner.commands)
 
 
 def test_temporary_source_block_validates_and_applies_ttl():
@@ -232,9 +233,110 @@ def test_mac_block_and_unblock_are_device_scoped():
     assert blocked == {"mac_address": "02:00:00:00:00:01", "blocked": True}
     assert unblocked["unblocked"] is True
     delete_commands = [command for command, _input in runner.commands if "delete" in command]
-    assert len(delete_commands) == 8
+    assert len(delete_commands) == 9
     assert any("blocked_devices" in command for command in delete_commands)
     assert sum(command[0] == "tc" for command in delete_commands) == 2
+
+
+def test_unblock_ignores_already_absent_tc_filter():
+    class MissingFilterRunner(NftRunner):
+        def __call__(self, command, **kwargs):
+            self.commands.append((command, kwargs.get("input")))
+            if command[:3] == ["nft", "list", "table"]:
+                return subprocess.CompletedProcess(command, 1, "", "table missing")
+            if command[:3] == ["tc", "filter", "delete"]:
+                raise subprocess.CalledProcessError(
+                    2,
+                    command,
+                    stderr="Filter with specified priority/protocol not found",
+                )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+    result = NftablesHealingExecutor(MissingFilterRunner()).execute(
+        {
+            "action_id": "UNBLOCK",
+            "ipv4": "10.42.0.2",
+            "mac_address": None,
+            "connected": 0,
+            "parameters": {},
+        }
+    )
+
+    assert result["unblocked"] is True
+    assert "rate_limit:10.42.0.2" in result["removed"]
+
+
+def test_full_isolation_uses_persistent_timeout_and_marks_heartbeat_rules():
+    runner = NftRunner()
+    result = NftablesHealingExecutor(
+        runner, default_isolation_ttl_seconds=90
+    ).execute(
+        {
+            "action_id": "SEG-03",
+            "device_id": "iot-1",
+            "ipv4": "10.42.0.2",
+            "mac_address": "02:00:00:00:00:01",
+            "connected": 1,
+            "parameters": {"heartbeat_ipv4": "192.0.2.10"},
+        }
+    )
+
+    assert result["ttl_seconds"] == 90
+    assert result["permanent"] is False
+    assert any(
+        command[:6]
+        == ["nft", "add", "element", "inet", "iot_guard", "timed_isolated_devices"]
+        and command[-1] == "{ 10.42.0.2 timeout 90s }"
+        for command, _input in runner.commands
+    )
+    heartbeat_rules = [
+        command
+        for command, _input in runner.commands
+        if command[:4] == ["nft", "insert", "rule", "inet"]
+    ]
+    assert len(heartbeat_rules) == 2
+    assert all(
+        command[-2:] == ["comment", "iot-guard-heartbeat-10.42.0.2"]
+        for command in heartbeat_rules
+    )
+
+
+def test_unblock_removes_marked_and_legacy_heartbeat_rules():
+    class HeartbeatListingRunner(NftRunner):
+        def __call__(self, command, **kwargs):
+            self.commands.append((command, kwargs.get("input")))
+            if command[:3] == ["nft", "list", "table"]:
+                return subprocess.CompletedProcess(command, 1, "", "table missing")
+            if command[:6] == ["nft", "-a", "list", "chain", "inet", "iot_guard"]:
+                stdout = (
+                    "ip saddr 10.42.0.2 ip daddr 192.0.2.10 accept "
+                    'comment "iot-guard-heartbeat-10.42.0.2" # handle 41\n'
+                    "ip saddr 192.0.2.10 ip daddr 10.42.0.2 accept # handle 42\n"
+                    "ip saddr 10.42.0.9 ip daddr 192.0.2.10 accept # handle 43\n"
+                )
+                return subprocess.CompletedProcess(command, 0, stdout, "")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+    runner = HeartbeatListingRunner()
+    result = NftablesHealingExecutor(runner).execute(
+        {
+            "action_id": "UNBLOCK",
+            "device_id": "iot-1",
+            "ipv4": "10.42.0.2",
+            "mac_address": None,
+            "connected": 0,
+            "parameters": {},
+        }
+    )
+
+    assert "heartbeat_rule:41" in result["removed"]
+    assert "heartbeat_rule:42" in result["removed"]
+    heartbeat_deletes = [
+        command
+        for command, _input in runner.commands
+        if command[:6] == ["nft", "delete", "rule", "inet", "iot_guard", "forward"]
+    ]
+    assert [command[-1] for command in heartbeat_deletes] == ["41", "42"]
 
 
 def test_unblock_also_removes_matching_blocked_networks():
@@ -363,7 +465,9 @@ def test_escalation_actions_and_permanent_quarantine_approval():
     assert executor.execute(request("ESC-03"))["report_generated"] is True
     with pytest.raises(HealingActionError, match="approved=true"):
         executor.execute(request("ESC-02"))
-    assert executor.execute(request("ESC-02", {"approved": True}))["permanent"] is True
+    permanent = executor.execute(request("ESC-02", {"approved": True}))
+    assert permanent["permanent"] is True
+    assert permanent["ttl_seconds"] is None
 
 
 def test_incident_report_worker_stores_database_snapshot(tmp_path):

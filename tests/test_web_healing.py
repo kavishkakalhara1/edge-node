@@ -283,6 +283,45 @@ def test_dashboard_admin_panel_filters_and_queues_unblock(tmp_path, monkeypatch)
     assert '!document.querySelector(".admin-panel :focus")' not in page.text
 
 
+def test_admin_cloud_connection_toggle_is_authenticated_and_persistent(
+    tmp_path, monkeypatch
+):
+    client, database = client_for(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        web,
+        "settings",
+        replace(
+            web.settings,
+            healing_api_token="test-token",
+            cloud_api_endpoint="https://cloud.example/report",
+        ),
+    )
+    with client:
+        page = client.get("/")
+        unauthorized = client.put(
+            "/api/admin/cloud-connection", json={"enabled": False}
+        )
+        disabled = client.put(
+            "/api/admin/cloud-connection",
+            headers={"X-IoT-Guard-Token": "test-token"},
+            json={"enabled": False},
+        )
+        persisted = client.get("/api/admin/cloud-connection")
+        enabled = client.put(
+            "/api/admin/cloud-connection",
+            headers={"X-IoT-Guard-Token": "test-token"},
+            json={"enabled": True},
+        )
+
+    assert page.status_code == 200
+    assert 'id="cloud-connection-toggle"' in page.text
+    assert unauthorized.status_code == 401
+    assert disabled.json() == {"configured": True, "enabled": False}
+    assert persisted.json() == {"configured": True, "enabled": False}
+    assert database.cloud_delivery_enabled() is True
+    assert enabled.json() == {"configured": True, "enabled": True}
+
+
 def test_dashboard_shows_wireless_attack_alert(tmp_path, monkeypatch):
     client, database = client_for(tmp_path, monkeypatch)
     with client:

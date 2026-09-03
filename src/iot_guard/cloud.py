@@ -65,6 +65,7 @@ class CloudReporter:
             [SplitResult, str, float], http.client.HTTPConnection
         ] = _bound_connection,
         recorder: Callable[[dict[str, Any]], None] | None = None,
+        enabled_provider: Callable[[], bool] | None = None,
     ) -> None:
         self.endpoint = endpoint.strip()
         self.uplink_interface = uplink_interface.strip()
@@ -73,6 +74,7 @@ class CloudReporter:
         self._connection_factory = connection_factory
         self._sender = sender or self._post
         self._recorder = recorder
+        self._enabled_provider = enabled_provider
         if self.endpoint:
             if not self.uplink_interface:
                 raise ValueError("Cloud uplink interface is required when cloud reporting is enabled")
@@ -85,7 +87,9 @@ class CloudReporter:
 
     @property
     def enabled(self) -> bool:
-        return bool(self.endpoint)
+        return bool(self.endpoint) and (
+            self._enabled_provider is None or self._enabled_provider()
+        )
 
     def submit(self, payload: dict[str, Any]) -> Any | bool:
         if not self.enabled:

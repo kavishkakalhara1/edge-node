@@ -556,3 +556,21 @@ def test_cloud_reporter_records_each_delivery():
     assert entries[1]["error"] == "connection refused"
     assert entries[2]["duration_ms"] is None
     assert entries[2]["error"].startswith("unsupported flag")
+
+
+def test_cloud_reporter_runtime_toggle_controls_delivery():
+    state = {"enabled": True}
+    sender = Mock(return_value={"accepted": True})
+    reporter = CloudReporter(
+        "https://cloud.example/report",
+        "eth0",
+        sender=sender,
+        enabled_provider=lambda: state["enabled"],
+    )
+
+    assert reporter.submit({"flag": "anomaly", "device_id": "iot-1"})
+    state["enabled"] = False
+    assert reporter.submit({"flag": "anomaly", "device_id": "iot-1"}) is False
+    state["enabled"] = True
+    assert reporter.submit({"flag": "anomaly", "device_id": "iot-1"})
+    assert sender.call_count == 2
